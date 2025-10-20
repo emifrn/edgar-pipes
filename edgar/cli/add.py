@@ -14,9 +14,8 @@ import sys
 import sqlite3
 
 # Local modules
+from edgar import db
 from edgar import cache
-from edgar import db
-from edgar import db
 from edgar.cli.shared import Cmd
 from edgar.result import Result, ok, err, is_ok, is_not_ok
 
