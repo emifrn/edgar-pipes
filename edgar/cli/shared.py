@@ -105,31 +105,34 @@ def _cols_make_sort(sort_specs):
     return sort_key
 
 
-def process_cols(data: list[dict], 
-                 cols_args: list[str] | None, 
+def process_cols(data: list[dict],
+                 cols_args: list[str] | None,
                  default_cols: list[str]) -> Result[tuple[list[dict], list[str]], str]:
     """
     Apply column processing: parsing, validation, sorting (type-aware), filtering.
     Returns (processed_data, column_headers).
+
+    Note: Always preserves 'pid' field in data for delete command compatibility,
+    even if not in display columns.
     """
     if not data:
         return ok(([], []))
-    
+
     # Determine columns and sort specs
     if cols_args:
         display_cols, sort_specs = _cols_parse(cols_args)
     else:
         display_cols = default_cols
         sort_specs = []
-    
+
     # Validate columns
     available_cols = list(data[0].keys())
     result = _cols_grep(available_cols, display_cols)
     if is_not_ok(result):
         return result
-    
+
     valid_cols = result[1]
-    
+
     # Apply type-aware sorting if specified
     processed_data = data
     if sort_specs:
@@ -138,102 +141,54 @@ def process_cols(data: list[dict],
             processed_data = []
             for record in data:
                 processed_record = dict(record)  # Copy the record
-                
+
                 for col, direction in sort_specs:
                     if col in processed_record and isinstance(processed_record[col], list):
                         # Sort array field in-place
                         reverse = (direction == 'DESC')
                         processed_record[col] = sorted(processed_record[col], reverse=reverse)
-                
+
                 processed_data.append(processed_record)
-            
+
             # Step 2: Sort records by scalar fields (cross-record sorting)
-            scalar_sort_specs = [(col, direction) for col, direction in sort_specs 
+            scalar_sort_specs = [(col, direction) for col, direction in sort_specs
                                  if not isinstance(processed_data[0].get(col), list)]
-            
+
             if scalar_sort_specs:
                 processed_data = sorted(processed_data, key=_cols_make_sort(scalar_sort_specs))
-                
+
         except Exception as e:
             return err(f"shared.process_cols: sorting failed: {e}")
-    
-    # Filter data to selected columns
-    filtered_data = [{col: row[col] for col in valid_cols} for row in processed_data]
-    
+
+    # Filter data to selected columns, but always preserve 'pid' for delete command
+    filtered_data = []
+    for row in processed_data:
+        filtered_row = {col: row[col] for col in valid_cols}
+        # Preserve pid if it exists (needed for delete command)
+        if 'pid' in row and 'pid' not in filtered_row:
+            filtered_row['pid'] = row['pid']
+        filtered_data.append(filtered_row)
+
     return ok((filtered_data, valid_cols))
 
 
-def is_grouped_data(data: list[dict]) -> bool:
-    """
-    Detect if data contains grouped records (has array fields).
-    """
-    if not data:
-        return False
-    
-    return any(
-        isinstance(value, list) 
-        for record in data 
-        for value in record.values()
-    )
-
-
-def validate_data_type(data: list[dict], command_name: str, expected_type: str) -> Result[None, str]:
-    """
-    Validate input data type matches command expectations.
-    expected_type: 'flat' or 'grouped'
-    """
-    if not data:
-        return ok(None)
-    
-    is_grouped = is_grouped_data(data)
-    
-    if expected_type == 'flat' and is_grouped:
-        return err(f"{command_name} command cannot process grouped data. Use 'summary' to flatten first.")
-    elif expected_type == 'grouped' and not is_grouped:
-        return err(f"{command_name} command requires grouped data. Use 'group' command first.")
-    
-    return ok(None)
-
-
-def separate_group_and_array_fields(record: dict) -> tuple[dict, dict]:
-    """
-    Separate scalar group keys from array data fields.
-    Returns (group_fields, array_fields).
-    """
-    group_fields = {}
-    array_fields = {}
-    
-    for key, value in record.items():
-        if isinstance(value, list):
-            array_fields[key] = value
-        else:
-            group_fields[key] = value
-    
-    return group_fields, array_fields
-
-
-def merge_stdin_field(field_name: str, 
+def merge_stdin_field(field_name: str,
                       stdin_data: list[dict],
                       explicit_values: list[str] | None = None) -> list[str] | None:
     """
-    Extract field from stdin packets and merge with explicit values.
-    Handles both scalar and array field values from grouped data.
-    
+    Extract scalar field from stdin packets and merge with explicit values.
+
     Returns None if no values found, list of values otherwise.
     """
     merged_values = []
-    
-    # Extract from stdin (handle scalar/array)
+
+    # Extract from stdin
     for item in stdin_data:
         if field_name in item:
-            value = item[field_name]
-            if isinstance(value, list):
-                merged_values.extend(value)
-            else:
-                merged_values.append(value)
-    
+            merged_values.append(item[field_name])
+
     # Add explicit values
     if explicit_values:
         merged_values.extend(explicit_values)
-    
+
     return merged_values if merged_values else None

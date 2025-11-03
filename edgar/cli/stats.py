@@ -55,7 +55,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
         # Get CIK from ticker
         cik = None
         if args.ticker:
-            result = db.queries.entity_select(conn, [args.ticker])
+            result = db.queries.entities.select(conn, [args.ticker])
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -88,7 +88,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
                 return err("--ticker required when using --group")
 
             # Get role patterns for group
-            result = db.queries.group_role_patterns_match(conn, cik)
+            result = db.queries.role_patterns.match_groups(conn, cik)
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -109,7 +109,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
                 return err("--ticker required when using --pattern")
 
             # First, get all filings for this CIK
-            result = db.queries.entity_filings_select(conn, ciks=[cik])
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik])
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -122,7 +122,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
             access_nos = [f["access_no"] for f in filings]
 
             # Get all roles matching pattern
-            result = db.queries.filing_roles_select_detailed(
+            result = db.queries.roles.select_with_entity(
                 conn,
                 access_nos=access_nos,
                 pattern=args.pattern
@@ -155,7 +155,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
             return err("could not determine CIK (use --ticker or pipe data with cik)")
 
         # Get concept frequency analysis
-        result = db.queries.concept_frequency_analysis(
+        result = db.queries.concepts.frequency(
             conn,
             cik,
             role_filter,

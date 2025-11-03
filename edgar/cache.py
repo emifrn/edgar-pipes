@@ -11,7 +11,7 @@ from edgar import xbrl
 from edgar.result import Result, ok, err, is_ok, is_not_ok
 
 
-def resolve_entities(conn: sqlite3.Connection, tickers: list[str] | None) -> Result[list[dict[str, Any]], str]:
+def resolve_entities(conn: sqlite3.Connection, user_agent: str, tickers: list[str] | None) -> Result[list[dict[str, Any]], str]:
     """
     Return entities from cache or fetch from SEC API if missing.
     If tickers is None or empty: return all entities from DB (no network).
@@ -19,22 +19,22 @@ def resolve_entities(conn: sqlite3.Connection, tickers: list[str] | None) -> Res
     """
 
     if not tickers:
-        return db.queries.entity_select(conn, None)
+        return db.queries.entities.select(conn, None)
 
     tickers = [t.lower() for t in tickers]
-    
+
     # Get cached entities
-    result = db.queries.entity_select(conn, tickers)
+    result = db.queries.entities.select(conn, tickers)
     if is_not_ok(result):
         return result
-    
+
     found = result[1]
     have = {row["ticker"] for row in found}
     missing = [t for t in tickers if t not in have]
 
     if missing:
         # Fetch missing entities from SEC API
-        result = xbrl.sec_api.entity_fetch_by_tickers(missing)
+        result = xbrl.sec_api.fetch_entities_by_tickers(user_agent, missing)
         if is_not_ok(result):
             return result
         
@@ -42,12 +42,13 @@ def resolve_entities(conn: sqlite3.Connection, tickers: list[str] | None) -> Res
         
         # Cache each entity
         for entity in entities:
-            result = db.queries.entity_insert(conn, entity["cik"], entity["ticker"], entity["name"])
+            data = [{"cik": entity["cik"], "ticker": entity["ticker"].lower(), "name": entity["name"]}]
+            result = db.store.insert(conn, "entities", data)
             if is_not_ok(result):
                 return result
-        
+
         # Get updated list including newly cached entities
-        result = db.queries.entity_select(conn, tickers)
+        result = db.queries.entities.select(conn, tickers)
         if is_not_ok(result):
             return result
         
@@ -56,12 +57,12 @@ def resolve_entities(conn: sqlite3.Connection, tickers: list[str] | None) -> Res
     return ok(found)
 
 
-def filing_resolve_recent(conn: sqlite3.Connection, cik: str, form_types: set[str], after_date: datetime | None = None, force: bool = False) -> Result[list[dict[str, Any]], str]:
+def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_types: set[str], after_date: datetime | None = None, force: bool = False) -> Result[list[dict[str, Any]], str]:
     """
     Return recent filings for a CIK, fetch and cache if missing.
     Respects after_date filter for both cached and fresh data.
     """
-    
+
     after_str = after_date.strftime('%Y-%m-%d') if after_date else None
 
     if not force:
@@ -69,21 +70,21 @@ def filing_resolve_recent(conn: sqlite3.Connection, cik: str, form_types: set[st
 
         if after_date:
             date_filters = [('filing_date', '>=', after_str)]
-            result = db.queries.entity_filings_select(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters)
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters)
         else:
-            result = db.queries.entity_filings_select(conn, ciks=[cik], form_types=list(form_types))
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types))
 
         if is_not_ok(result):
             return result
-    
+
         filings = result[1]
-        
+
         # If we have cached filings that match our criteria, return them
         if filings:
             return ok(filings)
-    
+
     # No suitable cached filings, fetch from SEC API
-    result = xbrl.sec_api.filing_fetch_by_cik(cik, form_types)
+    result = xbrl.sec_api.fetch_filings_by_cik(user_agent, cik, form_types)
     if is_not_ok(result):
         return result
     
@@ -106,30 +107,30 @@ def filing_resolve_recent(conn: sqlite3.Connection, cik: str, form_types: set[st
     return ok([])
 
 
-def resolve_xbrl_url(conn: sqlite3.Connection, cik: str, access_no: str) -> Result[str | None, str]:
+def resolve_xbrl_url(conn: sqlite3.Connection, user_agent: str, cik: str, access_no: str) -> Result[str | None, str]:
     """
     Return cached XBRL file URL, fetch and cache if missing.
     Returns None if no XBRL file exists for this filing.
     """
-    
+
     # Check if URL is already cached
-    result = db.queries.filing_get_xbrl_url(conn, access_no)
+    result = db.queries.filings.get_xbrl_url(conn, access_no)
     if is_not_ok(result):
         return result
-    
+
     url = result[1]
     if url:
         return ok(url)
-    
+
     # Not cached, fetch from SEC API
-    result = xbrl.sec_api.filing_fetch_xbrl_url(cik, access_no)
+    result = xbrl.sec_api.fetch_filing_xbrl_url(user_agent, cik, access_no)
     if is_not_ok(result):
         return result
     
     url = result[1]
     if url:
         # Cache the URL
-        result = db.queries.filing_update_xbrl_url(conn, access_no, url)
+        result = db.queries.filings.update_xbrl_url(conn, access_no, url)
         if is_not_ok(result):
             return result
         return ok(url)
@@ -138,13 +139,13 @@ def resolve_xbrl_url(conn: sqlite3.Connection, cik: str, access_no: str) -> Resu
     return ok(None)
 
 
-def filing_roles_resolve(conn: sqlite3.Connection, cik: str, access_no: str) -> Result[list[str], str]:
+def resolve_roles(conn: sqlite3.Connection, user_agent: str, cik: str, access_no: str) -> Result[list[str], str]:
     """
     Get role names for a filing, fetching from XBRL if not cached.
     Returns list of unique role names.
     """
 
-    result = db.queries.filing_roles_select(conn, access_no)
+    result = db.queries.roles.select_by_filing(conn, access_no)
     if is_not_ok(result):
         return result
 
@@ -152,83 +153,89 @@ def filing_roles_resolve(conn: sqlite3.Connection, cik: str, access_no: str) -> 
     if roles:
         return ok(roles)
 
-    result = resolve_xbrl_url(conn, cik, access_no)
+    result = resolve_xbrl_url(conn, user_agent, cik, access_no)
     if is_not_ok(result):
         return result
-    
+
     xbrl_url = result[1]
     if not xbrl_url:
-        return err(f"cache.filing_roles_resolve: no XBRL file found for {access_no}")
+        return err(f"cache.resolve_roles: no XBRL file found for {access_no}")
     
     result = xbrl.arelle.load_model(xbrl_url)
     if is_not_ok(result):
         return result
     
     model = result[1]
-    roles = xbrl.arelle.roles(model)
+    roles = xbrl.arelle.extract_roles(model)
     if not roles:
         return ok([])
     
     cached = []
     for role in set(roles):
-        result = db.queries.filing_roles_insert_or_ignore(conn, access_no, role)
+        result = db.queries.roles.insert_or_ignore(conn, access_no, role)
         if is_ok(result):
             cached.append(role)
 
     return ok(cached)
 
 
-def filing_role_concepts_resolve(conn: sqlite3.Connection, cik: str, access_no: str, role_name: str) -> Result[list[dict[str, Any]], str]:
+def resolve_concepts(conn: sqlite3.Connection, user_agent: str, cik: str, access_no: str, role_name: str) -> Result[list[dict[str, Any]], str]:
     """
     Get concepts for a filing-role combination, fetching from XBRL if not cached.
     Returns list of concept records with taxonomy, tag, name.
     """
-    
-    result = db.queries.filing_role_concepts_select(conn, access_no, role_name)
+
+    result = db.queries.concepts.select_by_role(conn, access_no, role_name)
     if is_not_ok(result):
         return result
-    
+
     concepts = result[1]
     if concepts:
         return ok(concepts)
-    
-    result = resolve_xbrl_url(conn, cik, access_no)
+
+    result = resolve_xbrl_url(conn, user_agent, cik, access_no)
     if is_not_ok(result):
         return result
-    
+
     xbrl_url = result[1]
     if not xbrl_url:
-        return err(f"filing_role_concepts_resolve: no XBRL file found for {access_no}")
+        return err(f"cache.resolve_concepts: no XBRL file found for {access_no}")
     
     result = xbrl.arelle.load_model(xbrl_url)
     if is_not_ok(result):
         return result
     
     model = result[1]
-    role_concepts = xbrl.arelle.role_concepts(model, role_name)
+    role_concepts = xbrl.arelle.extract_concepts_by_role(model, role_name)
     if not role_concepts:
         return ok([])  # No concepts found for this role
     
     # Cache the concepts
     cached_concepts = []
     for concept in role_concepts:
-        result = db.queries.concept_insert_or_ignore(conn, cik, concept["taxonomy"], concept["tag"], concept["name"])
+        # Insert concept if missing
+        concept_data = [{"cik": cik, "taxonomy": concept["taxonomy"], "tag": concept["tag"], "name": concept["name"]}]
+        result = db.store.insert_or_ignore(conn, "concepts", concept_data)
         if is_not_ok(result):
             continue  # Skip this concept, continue with others
-        
+
+        # Get the concept_id
+        result = db.queries.concepts.get_id(conn, cik, concept["taxonomy"], concept["tag"])
+        if is_not_ok(result):
+            continue
         concept_id = result[1]
         
         # Get role_id
-        result = db.queries.filing_roles_insert_or_ignore(conn, access_no, role_name)
+        result = db.queries.roles.insert_or_ignore(conn, access_no, role_name)
         if is_not_ok(result):
             continue
         
         role_id = result[1]
         
-        # Link concept to role (insert into filing_role_concepts)
+        # Link concept to role (insert into role_concepts)
         try:
             cursor = conn.cursor()
-            cursor.execute("INSERT OR IGNORE INTO filing_role_concepts (rid, cid) VALUES (?, ?)", (role_id, concept_id))
+            cursor.execute("INSERT OR IGNORE INTO role_concepts (rid, cid) VALUES (?, ?)", (role_id, concept_id))
             conn.commit()
             cursor.close()
         except sqlite3.Error:

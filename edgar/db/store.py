@@ -46,7 +46,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
             -- Document Entity Information
             CREATE TABLE IF NOT EXISTS dei (
                 did                     INTEGER PRIMARY KEY,
-                access_no               TEXT NOT NULL,
+                access_no               TEXT NOT NULL UNIQUE,
                 doc_type                TEXT,
                 doc_period_end          TEXT,
                 fiscal_year             TEXT,
@@ -56,7 +56,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 FOREIGN KEY (access_no) REFERENCES filings(access_no) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS filing_roles (
+            CREATE TABLE IF NOT EXISTS roles (
                 rid         INTEGER PRIMARY KEY,
                 access_no   TEXT NOT NULL,
                 name        TEXT NOT NULL,
@@ -64,11 +64,11 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 FOREIGN KEY (access_no) REFERENCES filings(access_no) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS filing_role_concepts (
+            CREATE TABLE IF NOT EXISTS role_concepts (
                 rid         INTEGER NOT NULL,
                 cid         INTEGER NOT NULL,
                 PRIMARY KEY (rid, cid),
-                FOREIGN KEY (rid) REFERENCES filing_roles(rid) ON DELETE CASCADE,
+                FOREIGN KEY (rid) REFERENCES roles(rid) ON DELETE CASCADE,
                 FOREIGN KEY (cid) REFERENCES concepts(cid) ON DELETE CASCADE
             );
 
@@ -97,7 +97,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 xid             INTEGER NOT NULL,
                 unid            INTEGER NOT NULL,
                 value           NUMERIC NOT NULL,
-                FOREIGN KEY (rid) REFERENCES filing_roles(rid) ON DELETE CASCADE,
+                FOREIGN KEY (rid) REFERENCES roles(rid) ON DELETE CASCADE,
                 FOREIGN KEY (cid) REFERENCES concepts(cid) ON DELETE CASCADE,
                 FOREIGN KEY (xid) REFERENCES contexts(xid) ON DELETE CASCADE,
                 FOREIGN KEY (unid) REFERENCES units(unid) ON DELETE CASCADE,
@@ -121,15 +121,11 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
             CREATE TABLE IF NOT EXISTS role_patterns (
                 pid             INTEGER PRIMARY KEY,
                 cik             TEXT NOT NULL,
+                name            TEXT NOT NULL,
                 pattern         TEXT NOT NULL,
-                uid             INTEGER,
                 FOREIGN KEY (cik) REFERENCES entities(cik) ON DELETE CASCADE,
-                UNIQUE (cik, pattern)
+                UNIQUE (cik, name)
             );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_role_uid
-                ON role_patterns(cik, uid)
-                WHERE uid IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS group_role_patterns (
                 gid             INTEGER NOT NULL,

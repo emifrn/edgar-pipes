@@ -7,6 +7,7 @@ Unified journaling module providing journal I/O, history display, and journal ma
 import os
 import re
 import sys
+import json
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
@@ -24,11 +25,10 @@ from edgar.result import Result, ok, err, is_ok, is_not_ok
 
 def get_journals_dir() -> Path:
     """Get the directory where journals are stored."""
-    if journal_home := os.environ.get('EDGAR_PIPES_JOURNAL_HOME'):
-        journals_dir = Path(journal_home)
-    else:
-        journals_dir = Path.home() / ".config" / "edgar-pipes"
-
+    # Import here to avoid circular dependency
+    from edgar import config
+    cfg = config.load_config()
+    journals_dir = config.get_journal_path(cfg)
     journals_dir.mkdir(parents=True, exist_ok=True)
     return journals_dir
 
@@ -55,37 +55,38 @@ def get_journal_path(journal_name: Optional[str] = None) -> Path:
     """Get path to a journal file. Uses current journal if name not specified."""
     if journal_name is None:
         journal_name = get_current_journal_name()
-    
+
     journals_dir = get_journals_dir()
-    
+
     if journal_name == 'default':
-        return journals_dir / 'journal.txt'
+        return journals_dir / 'journal.jsonl'
     else:
-        return journals_dir / f'journal-{journal_name}.txt'
+        return journals_dir / f'journal-{journal_name}.jsonl'
 
 
 def get_next_index(journal_path: Path) -> int:
     """Get the next sequential index for journal entries."""
     if not journal_path.exists():
         return 1
-    
+
     try:
         with open(journal_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
+
         if not lines:
             return 1
-        
-        # Get index from last line
+
+        # Get index from last JSON entry
         last_line = lines[-1].strip()
-        if last_line and ' │ ' in last_line:
-            fixed_part = last_line.split(' │ ', 1)[0]
-            parts = fixed_part.strip().split()
-            if parts and parts[0].isdigit():
-                return int(parts[0]) + 1
-        
+        if last_line:
+            try:
+                entry = json.loads(last_line)
+                return entry.get("index", 0) + 1
+            except json.JSONDecodeError:
+                pass
+
         return len(lines) + 1
-        
+
     except Exception:
         return 1
 
@@ -93,7 +94,7 @@ def get_next_index(journal_path: Path) -> int:
 def write_entry(pipeline: list[str], status: str, error_msg: Optional[str] = None) -> None:
     """
     Write a pipeline command to the journal with timestamp and status.
-    
+
     Args:
         pipeline: List of command strings that make up the pipeline
         status: "OK" or "ERROR"
@@ -101,53 +102,62 @@ def write_entry(pipeline: list[str], status: str, error_msg: Optional[str] = Non
     """
     if not pipeline:
         return  # Nothing to journal
-    
+
     try:
         journal_path = get_journal_path()
         next_index = get_next_index(journal_path)
-        
-        # Split timestamp into date and time
+
+        # Create JSON entry
         now = datetime.now(timezone.utc)
-        date_str = now.strftime("%Y-%m-%d")
-        time_str = now.strftime("%H:%M:%S")
-        
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
         pipeline_str = " | ".join(pipeline)
-        
-        # Fixed-width formatting with box drawing separator
+
+        entry = {
+            "index": next_index,
+            "timestamp": timestamp,
+            "status": status,
+            "command": pipeline_str
+        }
+
         if status == "ERROR" and error_msg:
-            log_line = f"{next_index:3d}  {date_str}  {time_str}  ✗  │  [{error_msg}] {pipeline_str}\n"
-        else:
-            log_line = f"{next_index:3d}  {date_str}  {time_str}  ✓  │  {pipeline_str}\n"
-        
+            entry["error"] = error_msg
+
+        # Write as single line of JSON
         with open(journal_path, 'a', encoding='utf-8') as f:
-            f.write(log_line)
-            
+            f.write(json.dumps(entry) + '\n')
+
     except Exception as e:
         # Don't fail the main command if journaling fails
         print(f"journal: failed to write entry: {e}", file=sys.stderr)
 
 
-def read_entries(journal_name: Optional[str] = None) -> Result[list[str], str]:
+def read_entries(journal_name: Optional[str] = None) -> Result[list[dict], str]:
     """Read all journal entries from specified journal, creating if it doesn't exist."""
     try:
         journal_path = get_journal_path(journal_name)
-        
+
         if not journal_path.exists():
             # Auto-create journal and notify user
             journal_path.touch()
             display_name = journal_name if journal_name else get_current_journal_name()
             print(f"Created new journal: {display_name}", file=sys.stderr)
             return ok([])
-        
+
         entries = []
         with open(journal_path, 'r', encoding='utf-8') as f:
-            for line in f:
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if line:
-                    entries.append(line)
-        
+                    try:
+                        entry = json.loads(line)
+                        entries.append(entry)
+                    except json.JSONDecodeError as e:
+                        print(f"Warning: Skipping malformed entry at line {line_num}: {e}", file=sys.stderr)
+                        continue
+
         return ok(entries)
-        
+
     except Exception as e:
         return err(f"cli.journal.read_entries: {e}")
 
@@ -255,16 +265,16 @@ def journal_list() -> Result[None, str]:
     try:
         journals_dir = get_journals_dir()
         current = get_current_journal_name()
-        
+
         # Find all journal files
         journals = set()
-        
+
         # Check for default journal
-        if (journals_dir / 'journal.txt').exists():
+        if (journals_dir / 'journal.jsonl').exists():
             journals.add('default')
-        
+
         # Find named journals
-        for file in journals_dir.glob('journal-*.txt'):
+        for file in journals_dir.glob('journal-*.jsonl'):
             name = file.stem.replace('journal-', '')
             journals.add(name)
         
@@ -274,19 +284,19 @@ def journal_list() -> Result[None, str]:
         
         # Show configuration and journal list
         print(f"Journal directory: {journals_dir}", file=sys.stderr)
-        if os.environ.get('EDGAR_PIPES_JOURNAL_HOME'):
-            print("  (set by EDGAR_PIPES_JOURNAL_HOME environment variable)", file=sys.stderr)
+        if os.environ.get('EDGAR_PIPES_JOURNAL_PATH'):
+            print("  (set by EDGAR_PIPES_JOURNAL_PATH environment variable)", file=sys.stderr)
         else:
-            print("  (default location, override with EDGAR_PIPES_JOURNAL_HOME)", file=sys.stderr)
+            print("  (from config file, override with EDGAR_PIPES_JOURNAL_PATH)", file=sys.stderr)
         
         print("\nAvailable journals:", file=sys.stderr)
         for name in sorted(journals):
             marker = " (current)" if name == current else ""
             if name == 'default':
-                filename = "journal.txt"
+                filename = "journal.jsonl"
             else:
-                filename = f"journal-{name}.txt"
-            
+                filename = f"journal-{name}.jsonl"
+
             print(f"  {name:<15}{marker:<10} {filename}", file=sys.stderr)
         
         return ok(None)
@@ -310,6 +320,95 @@ def journal_current() -> Result[None, str]:
 
     except Exception as e:
         return err(f"cli.journal.journal_current: {e}")
+
+
+def journal_migrate(journal_name: Optional[str] = None) -> Result[None, str]:
+    """Migrate old .txt journal format to new .jsonl format."""
+    try:
+        journals_dir = get_journals_dir()
+
+        if journal_name is None:
+            journal_name = get_current_journal_name()
+
+        # Determine old and new paths
+        if journal_name == 'default':
+            old_path = journals_dir / 'journal.txt'
+            new_path = journals_dir / 'journal.jsonl'
+        else:
+            old_path = journals_dir / f'journal-{journal_name}.txt'
+            new_path = journals_dir / f'journal-{journal_name}.jsonl'
+
+        # Check if old journal exists
+        if not old_path.exists():
+            return err(f"journal migrate: old journal '{journal_name}' not found at {old_path}")
+
+        # Check if new journal already exists
+        if new_path.exists():
+            return err(f"journal migrate: new journal already exists at {new_path}. Delete it first if you want to re-migrate.")
+
+        # Read old format
+        with open(old_path, 'r', encoding='utf-8') as f:
+            old_lines = f.readlines()
+
+        # Convert each line
+        converted_count = 0
+        with open(new_path, 'w', encoding='utf-8') as f:
+            for line in old_lines:
+                line = line.strip()
+                if not line or ' │ ' not in line:
+                    continue
+
+                # Parse old format: "  1  2025-10-12  04:07:48  ✓  │  command"
+                try:
+                    fixed_part, command_part = line.split(' │ ', 1)
+                    fixed_fields = fixed_part.strip().split()
+
+                    if len(fixed_fields) < 4:
+                        continue
+
+                    index = int(fixed_fields[0])
+                    date = fixed_fields[1]
+                    time = fixed_fields[2]
+                    status_char = fixed_fields[3]
+
+                    status = "OK" if status_char == "✓" else "ERROR"
+                    command = command_part.strip()
+
+                    # Extract error message if present
+                    error_msg = None
+                    if status == "ERROR" and command.startswith('[') and ']' in command:
+                        end_bracket = command.find(']')
+                        error_msg = command[1:end_bracket]
+                        command = command[end_bracket + 1:].strip()
+
+                    # Create new JSON entry
+                    timestamp = f"{date}T{time}Z"
+                    entry = {
+                        "index": index,
+                        "timestamp": timestamp,
+                        "status": status,
+                        "command": command
+                    }
+
+                    if error_msg:
+                        entry["error"] = error_msg
+
+                    # Write as JSON line
+                    f.write(json.dumps(entry) + '\n')
+                    converted_count += 1
+
+                except Exception as e:
+                    print(f"Warning: Skipping malformed line: {line[:50]}... ({e})", file=sys.stderr)
+                    continue
+
+        print(f"Successfully migrated {converted_count} entries from {old_path.name} to {new_path.name}", file=sys.stderr)
+        print(f"Old journal preserved at: {old_path}", file=sys.stderr)
+        print(f"New journal created at: {new_path}", file=sys.stderr)
+
+        return ok(None)
+
+    except Exception as e:
+        return err(f"cli.journal.journal_migrate: {e}")
 
 
 def parse_replay_targets(targets: list[str]) -> Result[list[tuple[str, list[int] | None, bool]], str]:
@@ -562,6 +661,8 @@ def run_journal(cmd: Cmd, args) -> Result[None, str]:
         return journal_list()
     elif args.journal_cmd == 'current':
         return journal_current()
+    elif args.journal_cmd == 'migrate':
+        return journal_migrate(args.name if hasattr(args, 'name') else None)
     elif args.journal_cmd == 'replay':
         return journal_replay(args.targets)
     elif args.journal_cmd == 'on':
@@ -603,7 +704,11 @@ def add_arguments(subparsers):
     
     parser_current = journal_subparsers.add_parser("current", help="show current journal")
     parser_current.set_defaults(func=run_journal)
-    
+
+    parser_migrate = journal_subparsers.add_parser("migrate", help="migrate old .txt journal to .jsonl format")
+    parser_migrate.add_argument("name", nargs="?", help="journal name (optional, defaults to current)")
+    parser_migrate.set_defaults(func=run_journal)
+
     parser_replay = journal_subparsers.add_parser("replay", help="replay commands from journal")
     parser_replay.add_argument("targets", nargs="*", help="journal specifications like 'journal[indices]' or simple indices")
     parser_replay.set_defaults(func=run_journal)
@@ -626,7 +731,8 @@ def should_journal_command(current_cmd: str) -> bool:
     """Determine if a command should be journaled."""
     # Commands that shouldn't be journaled (meta/inspection commands)
     skip_commands = [
-        "history",
+        "config",   # Configuration management
+        "history",  # History inspection
         "journal",  # All journal subcommands
     ]
 
@@ -673,43 +779,23 @@ def run_history(cmd: Cmd, args) -> Result[None, str]:
         return err(f"cli.journal.run_history: {e}")
 
 
-def parse_journal_entry(line: str) -> dict[str, Any] | None:
-    """Parse a journal line into structured data."""
+def parse_journal_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Parse a journal entry (already a dict from JSON).
+    Normalizes the format for display functions.
+    """
     try:
-        # Split on the box drawing separator
-        if ' │ ' not in line:
-            return None
-            
-        fixed_part, command_part = line.split(' │ ', 1)
-        fixed_fields = fixed_part.strip().split()
-        
-        if len(fixed_fields) < 4:
-            return None
-            
-        index = int(fixed_fields[0])
-        date = fixed_fields[1]
-        time = fixed_fields[2]
-        status_char = fixed_fields[3]
-        
-        timestamp = f"{date} {time}"
-        status = "OK" if status_char == "✓" else "ERROR"
-        
-        # Handle error messages
-        command = command_part.strip()
-        error_msg = None
-        if status == "ERROR" and command.startswith('[') and ']' in command:
-            end_bracket = command.find(']')
-            error_msg = command[1:end_bracket]
-            command = command[end_bracket + 1:].strip()
-        
-        return {
-            "index": index,
-            "timestamp": timestamp,
-            "status": status,
-            "error_msg": error_msg,
-            "command": command
+        # Entry is already parsed JSON, just normalize field names
+        normalized = {
+            "index": entry.get("index", 0),
+            "timestamp": entry.get("timestamp", ""),
+            "status": entry.get("status", "OK"),
+            "error_msg": entry.get("error"),
+            "command": entry.get("command", "")
         }
-        
+
+        return normalized
+
     except Exception:
         return None
 
@@ -740,20 +826,27 @@ def display_entries(entries: list[dict]) -> None:
     """Display journal entries in themed table format."""
     if not entries:
         return
-    
+
     # Convert to table format
     table_data = []
     for entry in entries:
-        # Split timestamp into date and time
-        timestamp_parts = entry["timestamp"].split()
-        date = timestamp_parts[0] if len(timestamp_parts) > 0 else ""
-        time = timestamp_parts[1] if len(timestamp_parts) > 1 else ""
-        
+        # Parse ISO 8601 timestamp (2025-10-12T04:07:48Z)
+        timestamp = entry.get("timestamp", "")
+        if 'T' in timestamp:
+            parts = timestamp.split('T')
+            date = parts[0]
+            time = parts[1].rstrip('Z') if len(parts) > 1 else ""
+        else:
+            # Fallback for space-separated format
+            timestamp_parts = timestamp.split()
+            date = timestamp_parts[0] if len(timestamp_parts) > 0 else ""
+            time = timestamp_parts[1] if len(timestamp_parts) > 1 else ""
+
         # Build command field with optional error on second line
         command_text = entry["command"]
         if entry.get("error_msg"):
             command_text += f" | Error: {entry['error_msg']}"
-        
+
         table_data.append({
             "Index": entry["index"],
             "Date": date,
@@ -761,7 +854,7 @@ def display_entries(entries: list[dict]) -> None:
             "S": "✓" if entry["status"] == "OK" else "✗",
             "Command": command_text
         })
-    
+
     # Use themed table
     theme_name = cli.themes.get_default_theme()
     output = cli.themes.themed_table(table_data, headers=None, theme_name=theme_name)

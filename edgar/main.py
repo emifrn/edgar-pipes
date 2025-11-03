@@ -5,6 +5,7 @@ from pathlib import Path
 
 # Local modules
 from . import cli
+from . import config
 from . import pipeline
 from .cli.shared import Cmd
 from .result import Result, ok, err, is_ok, is_not_ok
@@ -41,14 +42,13 @@ def add_arguments(parser):
     cli.probe.add_arguments(subparsers)
     cli.select.add_arguments(subparsers)
     cli.delete.add_arguments(subparsers)
-    cli.summary.add_arguments(subparsers)
-    cli.group.add_arguments(subparsers)
     cli.journal.add_arguments(subparsers)
     cli.modify.add_arguments(subparsers)
     cli.update.add_arguments(subparsers)
     cli.report.add_arguments(subparsers)
     cli.calc.add_arguments(subparsers)
     cli.stats.add_arguments(subparsers)
+    cli.config.add_arguments(subparsers)
 
 
 def get_output_format(args):
@@ -76,21 +76,21 @@ def cli_main(args):
             print(cli.journal.get_status_bar(), file=sys.stderr)
 
         # Read packet from previous pipeline stage
-        stdin_result = pipeline.packet_read()
+        stdin_result = pipeline.read()
         if is_not_ok(stdin_result):
             error_msg = stdin_result[1]
             if not cli.journal.is_silent():
                 cli.journal.write_entry([current_cmd], "ERROR", error_msg)
             
             if pipeline.output_format() == 'packet':
-                print(pipeline.packet_err(error_msg))
+                print(pipeline.err(error_msg))
             else:
                 print(error_msg, file=sys.stderr)
             return
 
         # Build packet with pipeline history
         input_packet = stdin_result[1]  # None if start of pipeline
-        packet = pipeline.add_to_pipeline(input_packet, current_cmd)
+        packet = pipeline.add(input_packet, current_cmd)
         
         # Execute command with Cmd pattern
         cmd = packet["cmd"] if input_packet else {"name": "", "data": []}
@@ -103,7 +103,7 @@ def cli_main(args):
                 cli.journal.write_entry(packet["pipeline"], "ERROR", error_msg)
             
             if pipeline.output_format() == 'packet':
-                print(pipeline.packet_err(error_msg))
+                print(pipeline.err(error_msg))
             else:
                 print(error_msg, file=sys.stderr)
                 
@@ -125,7 +125,7 @@ def cli_main(args):
                 data_count = len(result[1]["data"])
                 print(f"\n=== DEBUG: {cmd_name} ({data_count} records) ===", file=sys.stderr)
                 # Use theme for debug output too
-                theme_name = args.theme
+                theme_name = args.theme if args.theme else None
                 print(cli.format.as_table(result[1]["data"], theme_name), file=sys.stderr)
                 print("=" * 50, file=sys.stderr)
 
@@ -134,7 +134,7 @@ def cli_main(args):
             
             if output_format == 'packet':
                 # Continue pipeline - output JSON packet
-                pipeline.packet_write(output_packet)
+                pipeline.write(output_packet)
             else:
                 # Terminal output - format according to user preference or auto-detection
                 if output_format == 'json':
@@ -142,7 +142,7 @@ def cli_main(args):
                 elif output_format == 'csv':
                     print(cli.format.as_csv(result[1]["data"]))
                 else:  # table or default
-                    theme_name = args.theme
+                    theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))
                 
                 if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent():
@@ -162,7 +162,22 @@ def cli_main(args):
 
 def main():
     """Entry point for console script."""
-    store = Path(__file__).resolve().parent / 'store.db'
+    # Load configuration
+    cfg = config.load_config()
+
+    # Check if user_agent is still default (first run - needs setup)
+    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.1.0":
+        config.init_config_interactive()
+        # Reload config after interactive setup
+        cfg = config.load_config()
+
+    # Ensure data directories exist
+    config.ensure_data_dirs(cfg)
+
+    # Get paths from config
+    db_path = str(config.get_database_path(cfg))
+    journal_path_str = str(config.get_journal_path(cfg))
+
     parser = argparse.ArgumentParser(
         prog='ep',
         description='Analyze SEC XBRL financial data through progressive discovery and extraction',
@@ -174,8 +189,14 @@ Available themes:
     nobox-minimal-dark
 
 Environment variables:
-  EDGAR_PIPES_JOURNAL_HOME  Journal storage directory (default: ~/.config/edgar-pipes)
+  EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
+  EDGAR_PIPES_DB_PATH       Database file location
+  EDGAR_PIPES_JOURNAL_PATH  Journal storage directory
   EDGAR_PIPES_THEME         Default table theme (default: financial-light)
+
+Configuration:
+  Config file: ~/.config/edgar-pipes/config.toml
+  Use "ep config show" to view current configuration
 
 Examples:
   ep probe filings -t AAPL --force
@@ -186,9 +207,16 @@ Examples:
 
 Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    parser.set_defaults(db=store, func=lambda cmd, args: err("Argument error: no action selected. See help, -h, for list of valid actions"))
+    parser.set_defaults(
+        db=db_path,
+        func=lambda cmd, args: err("No command specified. Use -h for help")
+    )
     add_arguments(parser)
     args = parser.parse_args()
+
+    # Store config in args for commands that need it
+    args.config = cfg
+
     cli_main(args)
 
 

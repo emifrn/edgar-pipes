@@ -139,3 +139,5 @@ edgar/*.db
 tags
 journals/
 .claude/
+topdf.sh
+*.pdf

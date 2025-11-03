@@ -368,8 +368,25 @@ def themed_table(data: list[dict], headers: list[str] = None, theme_name: str = 
 
 
 def get_default_theme() -> str:
-    """Get default theme name from environment or config."""
-    return os.environ.get('EDGAR_PIPES_THEME', 'financial-light')
+    """
+    Get default theme name with precedence:
+    1. Environment variable EDGAR_PIPES_THEME (highest)
+    2. Config file setting
+    3. Built-in default: 'nobox-minimal' (lowest)
+    """
+    # Check environment variable first
+    env_theme = os.environ.get('EDGAR_PIPES_THEME')
+    if env_theme:
+        return env_theme
+
+    # Try to load from config file
+    try:
+        from edgar import config
+        cfg = config.load_config()
+        return config.get_theme(cfg)
+    except Exception:
+        # Fallback if config system not available
+        return 'nobox-minimal'
 
 
 def list_available_themes() -> list[str]:

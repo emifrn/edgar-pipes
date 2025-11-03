@@ -34,8 +34,8 @@ def add_arguments(subparsers):
     # new role
     parser_role = new_subparsers.add_parser("role", help="create role pattern")
     parser_role.add_argument("-t", "--ticker", metavar="X", required=True, help="company ticker symbol")
+    parser_role.add_argument("-n", "--name", metavar="X", required=True, help="role pattern name")
     parser_role.add_argument("-p", "--pattern", metavar="X", required=True, help="regex pattern")
-    parser_role.add_argument("-u", "--uid", type=int, help="optional user-assigned ID")
     parser_role.set_defaults(func=run)
 
     # new group
@@ -53,9 +53,9 @@ def add_arguments(subparsers):
     parser_group.add_argument("--exclude", help="exclude concepts by name regex")
 
     # Role filters (explicit, edge case)
-    parser_group.add_argument("--role-uid", nargs="+", type=int, dest="role_uid", help="filter roles by user IDs")
-    parser_group.add_argument("--role-pattern", dest="role_pattern", help="filter roles by pattern regex")
-    parser_group.add_argument("--role-exclude", dest="role_exclude", help="exclude roles by pattern regex")
+    parser_group.add_argument("--role-names", nargs="+", dest="role_names", help="filter roles by names")
+    parser_group.add_argument("--role-pattern", dest="role_pattern", help="filter roles by name regex")
+    parser_group.add_argument("--role-exclude", dest="role_exclude", help="exclude roles by name regex")
 
     parser_group.set_defaults(func=run)
 
@@ -98,7 +98,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -113,7 +113,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         company_name = entity["name"]
 
         # Insert concept pattern with optional uid
-        result = db.queries.concept_pattern_insert_with_uid(
+        result = db.queries.concept_patterns.insert(
             conn, cik, args.name, args.pattern, args.uid
         )
         if is_not_ok(result):
@@ -157,7 +157,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -171,9 +171,9 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         cik = entity["cik"]
         company_name = entity["name"]
 
-        # Insert role pattern with optional uid
-        result = db.queries.role_pattern_insert_with_uid(
-            conn, cik, args.pattern, args.uid
+        # Insert role pattern with name
+        result = db.queries.role_patterns.insert(
+            conn, cik, args.name, args.pattern
         )
         if is_not_ok(result):
             conn.close()
@@ -182,10 +182,8 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         pattern_id = result[1]
 
         # Report success
-        print(f"Created role pattern for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Created role pattern '{args.name}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
         print(f"Pattern ID: {pattern_id}, CIK: {cik}", file=sys.stderr)
-        if args.uid is not None:
-            print(f"User ID: {args.uid}", file=sys.stderr)
         print(f"Pattern: {args.pattern}", file=sys.stderr)
 
         conn.close()
@@ -218,7 +216,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             args.exclude is not None
         ])
         has_role_filters = any([
-            args.role_uid is not None,
+            args.role_names is not None,
             args.role_pattern is not None,
             args.role_exclude is not None
         ])
@@ -233,7 +231,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             return err("new group: --from requires --ticker")
 
         # Create the group (always happens first)
-        result = db.queries.group_insert_or_ignore(conn, args.group_name)
+        result = db.queries.groups.insert_or_ignore(conn, args.group_name)
         if is_not_ok(result):
             conn.close()
             return result
@@ -249,7 +247,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             return ok(None)
 
         # Get ticker from database for derivation
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -269,7 +267,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             # Edge case: Filter roles explicitly
             result = cli.add.derive_and_link_roles(
                 conn, group_id, cik, args.source_group,
-                user_ids=args.role_uid,
+                role_names=args.role_names,
                 pattern=args.role_pattern,
                 exclude_pattern=args.role_exclude
             )
@@ -281,7 +279,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             # Default: Copy all roles from source group
             result = cli.add.derive_and_link_roles(
                 conn, group_id, cik, args.source_group,
-                user_ids=None,
+                role_names=None,
                 pattern=None,
                 exclude_pattern=None
             )

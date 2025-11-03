@@ -38,9 +38,11 @@ def add_arguments(subparsers):
     parser_roles.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol")
     parser_roles.add_argument("-a", "--access", metavar="X", help="SEC accession number (e.g., 0000320193-24-000007)")
     parser_roles.add_argument("-p", "--pattern", metavar="X", help="role names regex pattern")
+    parser_roles.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
     parser_roles.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
     parser_roles.add_argument("-c", "--cols", metavar="X", nargs="+", help="columns to include in output")
-    parser_roles.add_argument("--missing", action="store_true", help="show filings that have no roles matching the criteria")    
+    parser_roles.add_argument("-m", "--missing", action="store_true", help="show filings that have no roles matching the criteria")
+    parser_roles.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
     parser_roles.set_defaults(func=run)
 
     # Concepts subcommand
@@ -49,11 +51,13 @@ def add_arguments(subparsers):
     parser_concepts.add_argument("-a", "--access", metavar="X", help="SEC accession number")
     parser_concepts.add_argument("-r", "--role", metavar="X", help="specific role name")
     parser_concepts.add_argument("-p", "--pattern", metavar="X", help="regex pattern for concept tags")
+    parser_concepts.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
     parser_concepts.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
     parser_concepts.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
     parser_concepts.add_argument("-n", "--name", metavar="X", help="semantic concept name filter (e.g., 'cash', 'inventory')")
     parser_concepts.add_argument("--label", action="store_true", help="search concept labels instead of tags")
-    parser_concepts.add_argument("--missing", action="store_true", help="show filing-role pairs that have no concepts matching the criteria")
+    parser_concepts.add_argument("-m", "--missing", action="store_true", help="show filing-role pairs that have no concepts matching the criteria")
+    parser_concepts.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
     parser_concepts.set_defaults(func=run)
 
     # Groups subcommand
@@ -74,12 +78,34 @@ def add_arguments(subparsers):
     parser_patterns.set_defaults(func=run)
 
 
+def _deduplicate_rows(rows: list[dict]) -> list[dict]:
+    """
+    Remove duplicate rows based on all column values.
+    Preserves order of first occurrence.
+    """
+    if not rows:
+        return rows
+
+    seen = set()
+    unique_rows = []
+
+    for row in rows:
+        # Create hashable tuple from row values (sorted by keys for consistency)
+        row_tuple = tuple(sorted(row.items()))
+
+        if row_tuple not in seen:
+            seen.add(row_tuple)
+            unique_rows.append(row)
+
+    return unique_rows
+
+
 def run(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Route to appropriate select subcommand with input data from main."""
-    
+
     try:
         conn = sqlite3.connect(args.db)
-        
+
         # Initialize database if needed
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -116,7 +142,7 @@ def select_entities(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     
     # Determine what to query
     tickers = [args.ticker] if args.ticker else None
-    result = db.queries.entity_select(conn, tickers)
+    result = db.queries.entities.select(conn, tickers)
     if is_not_ok(result):
         return result
     
@@ -172,7 +198,7 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
     # Convert explicit ticker to CIKs if provided
     explicit_ciks = None
     if args.ticker:
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             return result
         entities = result[1]
@@ -186,11 +212,11 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
     
     # Execute database query
     date_filters = _parse_date_filters(args.date)
-    result = db.queries.entity_filings_select(conn, 
-                                              ciks = ciks,
-                                              form_types = args.form,
-                                              date_filters = date_filters,
-                                              stubs_only = args.stubs)
+    result = db.queries.filings.select_by_entity(conn,
+                                                 ciks = ciks,
+                                                 form_types = args.form,
+                                                 date_filters = date_filters,
+                                                 stubs_only = args.stubs)
     if is_not_ok(result):
         return result
     
@@ -217,7 +243,7 @@ def select_groups(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     """
     
     # Query all groups
-    result = db.queries.group_select(conn)
+    result = db.queries.groups.select(conn)
     if is_not_ok(result):
         return result
     
@@ -251,7 +277,7 @@ def _get_access_nos_from_ticker(conn: sqlite3.Connection, ticker: str) -> Result
     """
     
     # Resolve ticker to CIK
-    result = db.queries.entity_get_by_ticker(conn, ticker)
+    result = db.queries.entities.get(conn, ticker=ticker)
     if is_not_ok(result):
         return result
     
@@ -262,7 +288,7 @@ def _get_access_nos_from_ticker(conn: sqlite3.Connection, ticker: str) -> Result
     cik = entity["cik"]
     
     # Get all filings for this CIK
-    result = db.queries.entity_filings_select(conn, ciks=[cik])
+    result = db.queries.filings.select_by_entity(conn, ciks=[cik])
     if is_not_ok(result):
         return result
     
@@ -305,7 +331,7 @@ def _get_group_role_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result
     
     # Try explicit ticker first
     if args.ticker:
-        result = db.queries.entity_get_by_ticker(conn, args.ticker)
+        result = db.queries.entities.get(conn, ticker=args.ticker)
         if is_not_ok(result):
             return result
         
@@ -328,7 +354,7 @@ def _get_group_role_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result
         return err("cli.select._get_group_role_patterns: --group requires --ticker or pipeline data to resolve company")
     
     # Get group_id
-    result = db.queries.group_get_id(conn, args.group)
+    result = db.queries.groups.get_id(conn, args.group)
     if is_not_ok(result):
         return result
     
@@ -337,7 +363,7 @@ def _get_group_role_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result
         return err(f"cli.select._get_group_role_patterns: group '{args.group}' not found")
     
     # Get role patterns for this group/cik
-    result = db.queries.role_pattern_select_by_group(conn, group_id, cik)
+    result = db.queries.role_patterns.select_by_group(conn, group_id, cik)
     if is_not_ok(result):
         return result
     
@@ -371,11 +397,11 @@ def select_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         
         if group_patterns:
             group_pattern = "|".join(group_patterns)
-            result = db.queries.filing_roles_select_detailed(conn, access_nos, group_pattern)
+            result = db.queries.roles.select_with_entity(conn, access_nos, group_pattern)
         else:
-            result = db.queries.filing_roles_select_detailed(conn, access_nos, None)
+            result = db.queries.roles.select_with_entity(conn, access_nos, None)
     else:
-        result = db.queries.filing_roles_select_detailed(conn, access_nos, None)
+        result = db.queries.roles.select_with_entity(conn, access_nos, None)
     
     if is_not_ok(result):
         return result
@@ -385,7 +411,8 @@ def select_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     # Step 3: Apply explicit pattern filter (if requested)
     if args.pattern:
         try:
-            regex = re.compile(args.pattern)
+            flags = re.IGNORECASE if args.ignore_case else 0
+            regex = re.compile(args.pattern, flags)
             roles = [role for role in roles if regex.search(role['role_name'])]
         except re.error as e:
             return err(f"cli.select.select_roles: invalid regex pattern '{args.pattern}': {e}")
@@ -396,7 +423,7 @@ def select_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         missing_access_nos = [x for x in access_nos if x not in matched_access_nos]
         
         # Get filing records for the missing access numbers
-        result = db.queries.entity_filings_select(conn, access_nos=missing_access_nos)
+        result = db.queries.filings.select_by_entity(conn, access_nos=missing_access_nos)
         if is_not_ok(result):
             return result
         
@@ -417,7 +444,11 @@ def select_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         if is_not_ok(result):
             return result
         roles, _ = result[1]
-        
+
+        # Apply uniqueness filter if requested
+        if args.uniq:
+            roles = _deduplicate_rows(roles)
+
         return ok({"name": "roles", "data": roles})   
 
 
@@ -451,7 +482,7 @@ def _get_concept_source_from_filings_and_roles(conn: sqlite3.Connection, query_p
     
     concepts = []
     for access_no, role_name in query_pairs:
-        result = db.queries.filing_role_concepts_select(conn, access_no, role_name)
+        result = db.queries.concepts.select_by_role(conn, access_no, role_name)
         if is_not_ok(result):
             continue
         
@@ -471,7 +502,7 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
     """Extract concepts using ticker and group patterns (applies to all cached filings)."""
     
     # 1. Resolve ticker to entity
-    result = db.queries.entity_get_by_ticker(conn, args.ticker)
+    result = db.queries.entities.get(conn, ticker=args.ticker)
     if is_not_ok(result):
         return result
     
@@ -482,7 +513,7 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
     cik = entity["cik"]
     
     # 2. Get group_id
-    result = db.queries.group_get_id(conn, args.group)
+    result = db.queries.groups.get_id(conn, args.group)
     if is_not_ok(result):
         return result
     
@@ -491,7 +522,7 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
         return err(f"cli.select._get_concept_source_from_ticker_and_group: group '{args.group}' not found")
     
     # 3. Check if group has role patterns (warn if not)
-    result = db.queries.role_pattern_select_by_group(conn, group_id, cik)
+    result = db.queries.role_patterns.select_by_group(conn, group_id, cik)
     if is_not_ok(result):
         return result
     
@@ -501,20 +532,20 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
     
     # 4. Use dynamic concept matching to get all matching concepts
     search_field = "name" if args.label else "tag"
-    result = db.queries.select_concept_matches(conn, group_id, cik, args.name, search_field)
+    result = db.queries.concepts.select_by_pattern(conn, group_id, cik, args.name, search_field)
     if is_not_ok(result):
         return result
-    
+
     concepts = result[1]
-    
+
     # 5. Format results consistently with explicit extraction
     # Note: access_no and role_name will be empty for ticker-based queries
     # since concepts come from multiple filings/roles
     for concept in concepts:
         concept['access_no'] = ""  # Multiple filings
-        concept['role_name'] = ""  # Multiple roles  
+        concept['role_name'] = ""  # Multiple roles
         concept['taxonomy_name'] = xbrl.facts.taxonomy_name(concept['taxonomy'])
-        # concept_name and pattern are already set by select_concept_matches
+        # concept_name and pattern are already set by select_by_pattern
     
     return ok(concepts)
 
@@ -529,7 +560,7 @@ def _filter_concepts_by_group(conn: sqlite3.Connection, concepts: list[dict], ar
     if not cik:
         return err("_filter_concepts_by_group: concepts missing CIK field")
     
-    result = db.queries.group_get_id(conn, args.group)
+    result = db.queries.groups.get_id(conn, args.group)
     if is_not_ok(result):
         return result
     
@@ -538,7 +569,7 @@ def _filter_concepts_by_group(conn: sqlite3.Connection, concepts: list[dict], ar
         return err(f"_filter_concepts_by_group: group '{args.group}' not found")
     
     # Get all concept patterns for this group/cik
-    result = db.queries.concept_pattern_select_by_group(conn, group_id, cik)
+    result = db.queries.concept_patterns.select_by_group(conn, group_id, cik)
     if is_not_ok(result):
         return result
     
@@ -573,14 +604,15 @@ def _filter_concepts_by_group(conn: sqlite3.Connection, concepts: list[dict], ar
     return ok(filtered_concepts)
 
 
-def _filter_concepts_by_pattern(concepts: list[dict], pattern: str, use_label: bool) -> Result[list[dict], str]:
+def _filter_concepts_by_pattern(concepts: list[dict], pattern: str, use_label: bool, ignore_case: bool = False) -> Result[list[dict], str]:
     """Filter concepts using regex pattern on tag field."""
-    
+
     try:
-        regex = re.compile(pattern)
+        flags = re.IGNORECASE if ignore_case else 0
+        regex = re.compile(pattern, flags)
     except re.error as e:
         return err(f"_filter_concepts_by_pattern: invalid regex pattern '{pattern}': {e}")
-    
+
     filtered_concepts = []
     for concept in concepts:
         field_value = concept.get('name', '') if use_label else concept.get('tag', '')
@@ -633,7 +665,7 @@ def select_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     
     # Step 3: Apply additional regex pattern filtering (if requested)
     if args.pattern:
-        result = _filter_concepts_by_pattern(concepts, args.pattern, args.label)
+        result = _filter_concepts_by_pattern(concepts, args.pattern, args.label, args.ignore_case)
         if is_not_ok(result):
             return result
         concepts = result[1]
@@ -658,7 +690,7 @@ def select_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
         missing_roles = []
         for access_no, role_name in missing_pairs:
             # Get filing info for context
-            result = db.queries.entity_filing_get(conn, access_no)
+            result = db.queries.filings.get_with_entity(conn, access_no)
             if is_not_ok(result) or not result[1]:
                 continue
                 
@@ -691,7 +723,11 @@ def select_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
         if is_not_ok(result):
             return result
         concepts, _ = result[1]
-        
+
+        # Apply uniqueness filter if requested
+        if args.uniq:
+            concepts = _deduplicate_rows(concepts)
+
         return ok({"name": "concepts", "data": concepts})
 
 
@@ -737,6 +773,7 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
         patterns = result[1]
     
     # Consistent columns (only show user-visible IDs)
+    # Note: pid is included in data for delete command but hidden from default display
     default_cols = ['uid', 'type', 'ticker', 'cik', 'group_name', 'name', 'pattern']
 
     result = cli.shared.process_cols(patterns, args.cols, default_cols)
@@ -750,6 +787,7 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
 def format_pattern_record(pattern: dict, pattern_type: str, **kwargs) -> dict:
     """Format pattern record with consistent structure."""
     return {
+        "pid": pattern["pid"],  # Required for delete command
         "uid": pattern.get("uid"),
         "type": pattern_type,
         "ticker": kwargs.get("ticker", ""),
@@ -767,7 +805,7 @@ def _fetch_patterns_by_group(conn: sqlite3.Connection, ticker: str, group: str,
     """
     
     # Resolve ticker to CIK
-    result = db.queries.entity_get_by_ticker(conn, ticker)
+    result = db.queries.entities.get(conn, ticker=ticker)
     if is_not_ok(result):
         return result
     
@@ -781,7 +819,7 @@ def _fetch_patterns_by_group(conn: sqlite3.Connection, ticker: str, group: str,
     
     # Fetch role patterns
     if pattern_type in ["roles", "all"]:
-        result = db.queries.role_pattern_select(conn, group, cik)
+        result = db.queries.role_patterns.select(conn, group, cik)
         if is_not_ok(result):
             return result
         
@@ -799,7 +837,7 @@ def _fetch_patterns_by_group(conn: sqlite3.Connection, ticker: str, group: str,
     
     # Fetch concept patterns
     if pattern_type in ["concepts", "all"]:
-        result = db.queries.concept_pattern_select(conn, group, cik)
+        result = db.queries.concept_patterns.select(conn, group, cik)
         if is_not_ok(result):
             return result
         
@@ -831,7 +869,7 @@ def _fetch_patterns_by_uid(conn: sqlite3.Connection,
     # Resolve ticker filter to CIK if provided
     filter_cik = None
     if ticker_filter:
-        result = db.queries.entity_get_by_ticker(conn, ticker_filter)
+        result = db.queries.entities.get(conn, ticker=ticker_filter)
         if is_not_ok(result):
             return result
         
@@ -844,29 +882,14 @@ def _fetch_patterns_by_uid(conn: sqlite3.Connection,
     patterns = []
 
     for user_id in user_ids:
-        found = False
-
-        # Try role pattern
-        if pattern_type in ["roles", "all"]:
-            result = db.queries.role_pattern_get_by_uid_detailed(conn, filter_cik, user_id)
-            if is_not_ok(result):
-                return result
-
-            if result[1]:
-                p = result[1]
-
-                patterns.append(format_pattern_record(
-                    p, "role",
-                    ticker=p["ticker"],
-                    cik=p["cik"],
-                    group_name=""
-                ))
-                found = True
-                continue
+        # NOTE: Role patterns don't have UIDs (they use names instead)
+        # Only concept patterns support UID lookup
+        if pattern_type in ["roles"]:
+            return err(f"_fetch_patterns_by_uid: role patterns don't support UID lookup (use --type concepts)")
 
         # Try concept pattern
         if pattern_type in ["concepts", "all"]:
-            result = db.queries.concept_pattern_get_by_uid_detailed(conn, filter_cik, user_id)
+            result = db.queries.concept_patterns.get_with_entity(conn, filter_cik, str(user_id))
             if is_not_ok(result):
                 return result
 
@@ -880,10 +903,7 @@ def _fetch_patterns_by_uid(conn: sqlite3.Connection,
                     group_name="",
                     name=p["name"]
                 ))
-                found = True
-                continue
-
-        if not found:
-            return err(f"_fetch_patterns_by_uid: user ID {user_id} not found")
+            else:
+                return err(f"_fetch_patterns_by_uid: user ID {user_id} not found")
     
     return ok(patterns)

@@ -43,7 +43,7 @@ def _delete_entities(conn: sqlite3.Connection, entities: list[dict]) -> Result[l
     
     for entity in entities:
         cik = entity["cik"]
-        result = db.queries.entity_delete(conn, cik)
+        result = db.store.delete(conn, "entities", "cik", [cik])
         if is_not_ok(result):
             return err(f"cli.delete._delete_entities: failed to delete company {entity['ticker']}: {result[1]}")
         
@@ -79,7 +79,7 @@ def _delete_filings(conn: sqlite3.Connection, filings: list[dict]) -> Result[lis
         if not access_no:
             continue
             
-        result = db.queries.filing_delete(conn, access_no)
+        result = db.store.delete(conn, "filings", "access_no", [access_no])
         if is_not_ok(result):
             return err(f"cli.delete._delete_filings: failed to delete filing {access_no}: {result[1]}")
         
@@ -117,13 +117,13 @@ def _delete_roles(conn: sqlite3.Connection, roles: list[dict]) -> Result[list[di
             continue
             
         # Look up rid
-        query = "SELECT rid FROM filing_roles WHERE access_no = ? AND name = ?"
+        query = "SELECT rid FROM roles WHERE access_no = ? AND name = ?"
         result = db.store.select(conn, query, (access_no, role_name))
         if is_not_ok(result) or not result[1]:
             continue
 
         rid = result[1][0]["rid"]
-        result = db.store.delete(conn, "filing_roles", "rid", [rid])
+        result = db.store.delete(conn, "roles", "rid", [rid])
         if is_not_ok(result):
             return err(f"cli.delete._delete_roles: failed to delete role {role_name}: {result[1]}")
         
@@ -181,7 +181,7 @@ def _delete_concepts(conn: sqlite3.Connection, concepts: list[dict]) -> Result[l
             concept_ids.append(cid)
         
         cik = concept.get("cik", "unknown")
-        result = db.queries.entity_get_by_cik(conn, cik)
+        result = db.queries.entities.get(conn, cik=cik)
         if is_ok(result) and result[1]:
             company = result[1]["ticker"].upper()
         else:

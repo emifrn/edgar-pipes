@@ -34,7 +34,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
         # Select entities from database (no external fetching)
         # If no tickers specified, get all tickers from database
         tickers = args.ticker if args.ticker else None
-        result = db.queries.entity_select(conn, tickers)
+        result = db.queries.entities.select(conn, tickers)
         if is_not_ok(result):
             conn.close()
             return err(f"Error: {result[1]}")
@@ -55,7 +55,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
             ticker = company["ticker"].upper()
 
             # Get filings without facts (group-aware if group_filter is set)
-            result = db.queries.entity_filings_select(conn, ciks=[cik], stubs_only=True, group_filter=group_filter)
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik], stubs_only=True, group_filter=group_filter)
             if is_not_ok(result):
                 print(f"  Error querying filings: {result[1]}", file=sys.stderr)
                 continue
@@ -69,27 +69,28 @@ def run(cmd: Cmd, args) -> Result[None, str]:
                     print("  up to date (no filings without facts)", file=sys.stderr)
                 continue
 
-            # Get role mappings grouped by group name
-            result = db.queries.group_role_patterns_match(conn, cik)
-            if is_not_ok(result):
-                print(f"  Error getting group role mappings: {result[1]}", file=sys.stderr)
-                continue
-
-            role_map = result[1]
-            if not role_map:
-                print(f"  no groups with role patterns defined; skipping", file=sys.stderr)
-                continue
-
-            # Filter by groups if specified
-            if group_filter is not None:
-                role_map = {k: v for k, v in role_map.items() if k in group_filter}
-                if not role_map:
-                    print(f"  no matching groups found; skipping", file=sys.stderr)
-                    continue
-
             for f in filings:
                 access_no = f["access_no"]
                 filing_date = f.get("filing_date", "?")
+
+                # Get role mappings for this specific filing
+                result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
+                if is_not_ok(result):
+                    print(f"{ticker:<6}  {cik}  {access_no}  {filing_date}  ERROR: {result[1]}", file=sys.stderr)
+                    continue
+
+                role_map = result[1]
+                if not role_map:
+                    print(f"{ticker:<6}  {cik}  {access_no}  {filing_date}  ERROR: no groups with role patterns defined", file=sys.stderr)
+                    continue
+
+                # Filter by groups if specified
+                if group_filter is not None:
+                    role_map = {k: v for k, v in role_map.items() if k in group_filter}
+                    if not role_map:
+                        print(f"{ticker:<6}  {cik}  {access_no}  {filing_date}  ERROR: no matching groups found", file=sys.stderr)
+                        continue
+
                 result = _update_filing(conn, cik, access_no, role_map)
 
                 # Print result row
@@ -114,7 +115,7 @@ def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map:
     Returns dict with stats: {fiscal_period, candidates, chosen, inserted}
     """
     # Get XBRL URL from database (should be cached by probe filings)
-    result = db.queries.filing_get_xbrl_url(conn, access_no)
+    result = db.queries.filings.get_xbrl_url(conn, access_no)
     if is_not_ok(result):
         return err(f"Error getting XBRL URL: {result[1]}")
 
@@ -133,7 +134,7 @@ def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map:
     dei = xbrl.arelle.extract_dei(model, access_no)
 
     # Update DEI in database
-    result = db.queries.dei_insert_or_ignore(conn, dei)
+    result = db.queries.filings.insert_dei(conn, dei)
     if is_not_ok(result):
         return err(f"Error inserting DEI: {result[1]}")
 
@@ -145,7 +146,7 @@ def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map:
     all_candidates: list[dict[str, Any]] = []
     for group_name, role_tails in role_map.items():
         for role_tail in role_tails:
-            facts = xbrl.arelle.role_facts(model, role_tail)
+            facts = xbrl.arelle.extract_facts_by_role(model, role_tail)
             if not facts:
                 continue
             consolidated_facts = [f for f in facts if xbrl.facts.is_consolidated(f)]
@@ -158,7 +159,7 @@ def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map:
     chosen = _choose_best_per_group(conn, cik, fiscal_year, fiscal_period, all_candidates)
 
     # Insert facts
-    result = db.queries.fact_insert_bulk(conn, chosen)
+    result = db.queries.facts.insert(conn, chosen)
     if is_not_ok(result):
         return err(f"Error inserting facts: {result[1]}")
 
@@ -204,7 +205,7 @@ def _facts_to_records(conn: sqlite3.Connection, cik: str, facts: Iterable[Any], 
         taxonomy, tag = xbrl.facts.get_concept(f)
 
         # Lookup concept ID
-        result = db.queries.concept_get_id(conn, cik, taxonomy, tag)
+        result = db.queries.concepts.get_id(conn, cik, taxonomy, tag)
         if is_not_ok(result):
             continue  # Skip this fact
 
@@ -215,9 +216,13 @@ def _facts_to_records(conn: sqlite3.Connection, cik: str, facts: Iterable[Any], 
             if name is None:
                 # Fallback to filing label or tag
                 name = getattr(getattr(f, "concept", None), "label", lambda: tag)()
-            result = db.queries.concept_insert_or_ignore(conn, cik, taxonomy, tag, name)
+            concept_data = [{"cik": cik, "taxonomy": taxonomy, "tag": tag, "name": name}]
+            result = db.store.insert_or_ignore(conn, "concepts", concept_data)
             if is_not_ok(result):
                 continue  # Skip this fact
+            result = db.queries.concepts.get_id(conn, cik, taxonomy, tag)
+            if is_not_ok(result):
+                continue
             concept_id = result[1]
 
         rec = xbrl.facts.make_record(f, access_no, role_tail, concept_id)
@@ -240,7 +245,7 @@ def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str,
         dims_dict = dict(dims_items)
 
         # Get past fact modes for quarterly selection
-        result = db.queries.fact_select_past_modes(conn, cik, fiscal_year, cid, dims_dict if has_dims else {})
+        result = db.queries.facts.select_past_modes(conn, cik, fiscal_year, cid, dims_dict if has_dims else {})
         if is_not_ok(result):
             past_periods = []
         else:

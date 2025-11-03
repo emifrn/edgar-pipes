@@ -52,11 +52,6 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
     if not cmd["data"]:
         return ok({"name": "calc", "data": []})
 
-    # Validate input data type - calc only works on flat data
-    result = cli.shared.validate_data_type(cmd["data"], "calc", "flat")
-    if is_not_ok(result):
-        return result
-
     # Parse all expressions
     parsed_expressions = []
     for expr_str in args.expressions:

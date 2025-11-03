@@ -8,8 +8,9 @@ import shlex
 from typing import Any, TypedDict
 
 # Local modules
+from edgar import result
+from edgar.result import Result
 from edgar.cli.shared import Cmd
-from edgar.result import Result, ok, err
 
 
 class Packet(TypedDict):
@@ -31,78 +32,75 @@ def output_format() -> str:
         return 'packet'
 
 
-def packet_ok(cmd_name: str, data: list[dict]) -> str:
+def ok(cmd_name: str, data: list[dict]) -> str:
     """Create successful packet record in JSON envelope format."""
     return json.dumps({"ok": True, "name": cmd_name, "data": data})
 
 
-def packet_err(message: str) -> str:
+def err(message: str) -> str:
     """Create error packet record in JSON envelope format."""
     return json.dumps({"ok": False, "name": "error", "data": message})
 
 
-def packet_read() -> Result[Packet | None, str]:
+def read() -> Result[Packet | None, str]:
     """
-    Read packet format from stdin and convert to internal Packet format.
-    
+    Read single packet from stdin and convert to internal Packet format.
+
     Returns:
         Ok(Packet) - Successfully parsed packet with cmd and pipeline info
-        Ok(None) - No piped input (terminal start)
-        Err(str) - First error encountered or parsing failure
-        
+        Ok(None) - No piped input (terminal start) or empty input
+        Err(str) - Error packet received or parsing failure
+
     Behavior:
         - Returns None if no piped input (start of pipeline)
         - Stops on first error packet and returns the error message
-        - Extracts command data and attempts to rebuild pipeline history
+        - Extracts command data and pipeline history
         - Validates JSON structure
     """
     if sys.stdin.isatty():
-        return ok(None)  # No piped input - start of pipeline
-    
-    # For now, read single packet from stdin
-    # TODO: Handle multiple packets if needed
-    for line_no, line in enumerate(sys.stdin, 1):
-        line = line.strip()
-        if not line:
-            continue
-            
-        try:
-            envelope = json.loads(line)
-        except json.JSONDecodeError as e:
-            return err(f"pipeline.packet_read: line {line_no}: invalid JSON - {e}")
-        
-        # Validate envelope structure
-        if not isinstance(envelope, dict):
-            return err(f"pipeline.packet_read: line {line_no}: expected JSON object, got {type(envelope).__name__}")
-        
-        if "ok" not in envelope:
-            return err(f"pipeline.packet_read: line {line_no}: missing 'ok' field in packet")
-        
-        # Check for error
-        if not envelope["ok"]:
-            error_msg = envelope.get("data", "unknown packet error")
-            return err(str(error_msg))
-        
-        # Extract command data from success packet
-        if "data" not in envelope or "name" not in envelope:
-            return err(f"pipeline.packet_read: line {line_no}: missing required fields in packet")
-        
-        cmd = {
-            "name": envelope["name"],
-            "data": envelope["data"]
-        }
-        
-        # Extract pipeline history if available, otherwise start fresh
-        pipeline = envelope.get("pipeline", [])
-        
-        packet = {
-            "cmd": cmd,
-            "pipeline": pipeline
-        }
-        
-        return ok(packet)
-    
-    return ok(None)  # Empty input
+        return result.ok(None)  # No piped input - start of pipeline
+
+    # Read first non-empty line as single packet
+    line = sys.stdin.readline().strip()
+
+    if not line:
+        return result.ok(None)  # Empty input
+
+    try:
+        envelope = json.loads(line)
+    except json.JSONDecodeError as e:
+        return result.err(f"pipeline.read: invalid JSON - {e}")
+
+    # Validate envelope structure
+    if not isinstance(envelope, dict):
+        return result.err(f"pipeline.read: expected JSON object, got {type(envelope).__name__}")
+
+    if "ok" not in envelope:
+        return result.err(f"pipeline.read: missing 'ok' field in packet")
+
+    # Check for error
+    if not envelope["ok"]:
+        error_msg = envelope.get("data", "unknown packet error")
+        return result.err(str(error_msg))
+
+    # Extract command data from success packet
+    if "data" not in envelope or "name" not in envelope:
+        return result.err(f"pipeline.read: missing required fields in packet")
+
+    cmd = {
+        "name": envelope["name"],
+        "data": envelope["data"]
+    }
+
+    # Extract pipeline history if available, otherwise start fresh
+    pipeline = envelope.get("pipeline", [])
+
+    packet = {
+        "cmd": cmd,
+        "pipeline": pipeline
+    }
+
+    return result.ok(packet)
 
 
 def build_current_command() -> str:
@@ -110,7 +108,7 @@ def build_current_command() -> str:
     return ' '.join(shlex.quote(arg) for arg in sys.argv[1:])
 
 
-def packet_write(packet: Packet) -> None:
+def write(packet: Packet) -> None:
     """Write packet to stdout in JSON envelope format."""
     envelope = {
         "ok": True,
@@ -121,7 +119,7 @@ def packet_write(packet: Packet) -> None:
     print(json.dumps(envelope))
 
 
-def add_to_pipeline(packet: Packet | None, current_command: str) -> Packet:
+def add(packet: Packet | None, current_command: str) -> Packet:
     """Add current command to pipeline history."""
     if packet is None:
         # Start of pipeline

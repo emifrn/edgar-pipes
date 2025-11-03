@@ -29,7 +29,7 @@ def load_model(file_url: str) -> Result[ModelXbrl, str]:
         return err(f"load_model() {type(e).__name__}: {e}")
 
 
-def get_role_uri(model: ModelXbrl, tail: str) -> str | None:
+def _get_role_uri(model: ModelXbrl, tail: str) -> str | None:
     """
     Find full role URI by matching the tail portion.
     Returns the full URI if found, None if not found.
@@ -41,17 +41,17 @@ def get_role_uri(model: ModelXbrl, tail: str) -> str | None:
     return None
 
 
-def roles(model: ModelXbrl) -> list[str]:
-    """Return all role tails (linkrole URIs stripped of prefix) from the model."""
+def extract_roles(model: ModelXbrl) -> list[str]:
+    """Extract all role tails (linkrole URIs stripped of prefix) from the model."""
 
     return [uri.rsplit("/", 1)[-1] for uri in model.roleTypes]
 
 
-def role_facts(model: ModelXbrl, role_tail: str) -> list:
+def extract_facts_by_role(model: ModelXbrl, role_tail: str) -> list:
     """
-    Get all facts for a specific role from the XBRL model.
+    Extract all facts for a specific role from the XBRL model.
     """
-    role_uri = get_role_uri(model, role_tail)
+    role_uri = _get_role_uri(model, role_tail)
     if not role_uri:
         return []
 
@@ -76,11 +76,11 @@ def role_facts(model: ModelXbrl, role_tail: str) -> list:
     return out
 
 
-def role_concepts(model: ModelXbrl, role: str) -> list[dict[str, str]]:
+def extract_concepts_by_role(model: ModelXbrl, role: str) -> list[dict[str, str]]:
     """
-    Get unique concept definitions for a specific role.
+    Extract unique concept definitions for a specific role.
     """
-    facts = role_facts(model, role)
+    facts = extract_facts_by_role(model, role)
     seen = set()
     out = []
 

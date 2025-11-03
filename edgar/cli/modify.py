@@ -31,10 +31,10 @@ def add_arguments(subparsers):
     
     # modify role
     parser_role = modify_subparsers.add_parser("role", help="modify role pattern regex")
-    parser_role.add_argument("--uid", "-u", type=int, help="user ID to select pattern (for standalone mode)")
+    parser_role.add_argument("--name", "-n", help="pattern name to select pattern (for standalone mode)")
     parser_role.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
     parser_role.add_argument("--pattern", help="new regex pattern")
-    parser_role.add_argument("--new-uid", type=int, dest="new_uid", help="new user-assigned ID")
+    parser_role.add_argument("--new-name", dest="new_name", help="new pattern name")
     parser_role.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_role.set_defaults(func=run)
 
@@ -76,7 +76,7 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
         # Collect groups to modify
         if args.gid:
             # Standalone mode: fetch group by ID
-            result = db.queries.group_get_by_id(conn, args.gid)
+            result = db.queries.groups.get(conn, args.gid)
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -107,11 +107,11 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
 
 def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
-    """Modify role pattern regexes and/or user_id with preview/execute workflow."""
+    """Modify role pattern regexes and/or name with preview/execute workflow."""
 
     # Validate at least one modification field provided
-    if not args.pattern and args.new_uid is None:
-        return err("modify role: must provide --pattern, --new-uid, or both")
+    if not args.pattern and args.new_name is None:
+        return err("modify role: must provide --pattern, --new-name, or both")
 
     # Validate regex if provided
     if args.pattern:
@@ -129,11 +129,11 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
             return result
         
         # Collect patterns to modify
-        if args.uid:
-            # Standalone mode: fetch pattern by user ID
+        if args.name:
+            # Standalone mode: fetch pattern by name
             cik = None
             if args.ticker:
-                result = db.queries.entity_get_by_ticker(conn, args.ticker)
+                result = db.queries.entities.get(conn, ticker=args.ticker)
                 if is_not_ok(result):
                     conn.close()
                     return result
@@ -143,7 +143,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
                     return err(f"modify role: ticker '{args.ticker}' not found")
                 cik = entity["cik"]
 
-            result = db.queries.role_pattern_get_by_uid_detailed(conn, cik, args.uid)
+            result = db.queries.role_patterns.get_with_entity(conn, cik, args.name)
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -151,7 +151,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
             if not pattern:
                 conn.close()
                 ticker_msg = f" for {args.ticker}" if args.ticker else ""
-                return err(f"modify role: pattern with user ID {args.uid}{ticker_msg} not found")
+                return err(f"modify role: pattern with name '{args.name}'{ticker_msg} not found")
             patterns = [pattern]
         elif cmd["data"]:
             # Pipeline mode: validate and filter to role patterns
@@ -164,13 +164,13 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
                 return err("modify role: no role patterns in piped data")
         else:
             conn.close()
-            return err("modify role: no input. Use --uid (with optional --ticker) or pipe pattern data")
+            return err("modify role: no input. Use --name (with optional --ticker) or pipe pattern data")
 
         # Preview or execute
         if args.yes:
-            result = _execute_modify_roles(conn, patterns, args.pattern, args.new_uid)
+            result = _execute_modify_roles(conn, patterns, args.pattern, args.new_name)
         else:
-            result = _preview_modify_roles(patterns, args.pattern, args.new_uid)
+            result = _preview_modify_roles(patterns, args.pattern, args.new_name)
         
         conn.close()
         return result
@@ -208,7 +208,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
             # Standalone mode: fetch pattern by user ID
             cik = None
             if args.ticker:
-                result = db.queries.entity_get_by_ticker(conn, args.ticker)
+                result = db.queries.entities.get(conn, ticker=args.ticker)
                 if is_not_ok(result):
                     conn.close()
                     return result
@@ -218,7 +218,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
                     return err(f"modify concept: ticker '{args.ticker}' not found")
                 cik = entity["cik"]
 
-            result = db.queries.concept_pattern_get_by_uid_detailed(conn, cik, args.uid)
+            result = db.queries.concept_patterns.get_with_entity(conn, cik, str(args.uid))
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -274,13 +274,13 @@ def _preview_modify_groups(groups: list[dict], new_name: str) -> Result[Cmd, str
     return ok({"name": "modify_preview", "data": preview_data})
 
 
-def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_user_id: int = None) -> Result[Cmd, str]:
+def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_name: str = None) -> Result[Cmd, str]:
     """Generate preview of role pattern modifications."""
     preview_data = []
     for pattern in patterns:
         record = {
             "operation": "modify_role_pattern",
-            "uid": pattern.get("uid"),
+            "name": pattern.get("name"),
             "ticker": pattern.get("ticker", ""),
             "cik": pattern.get("cik", ""),
             "status": "preview"
@@ -290,9 +290,9 @@ def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_use
             record["current_pattern"] = pattern.get("pattern", "")
             record["new_pattern"] = new_pattern
 
-        if new_user_id is not None:
-            record["current_uid"] = pattern.get("uid")
-            record["new_uid"] = new_user_id
+        if new_name is not None:
+            record["current_name"] = pattern.get("name")
+            record["new_name"] = new_name
 
         preview_data.append(record)
     return ok({"name": "modify_preview", "data": preview_data})
@@ -339,7 +339,7 @@ def _execute_modify_groups(conn: sqlite3.Connection, groups: list[dict], new_nam
         group_id = group["gid"]
         old_name = group["group_name"]
 
-        result = db.queries.group_update_name(conn, group_id, new_name)
+        result = db.queries.groups.update_name(conn, group_id, new_name)
         if is_not_ok(result):
             return result
 
@@ -354,7 +354,7 @@ def _execute_modify_groups(conn: sqlite3.Connection, groups: list[dict], new_nam
     return ok({"name": "modify_result", "data": results})
 
 
-def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pattern: str = None, new_user_id: int = None) -> Result[Cmd, str]:
+def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pattern: str = None, new_name: str = None) -> Result[Cmd, str]:
     """Execute role pattern modifications."""
     results = []
 
@@ -363,13 +363,13 @@ def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pa
         ticker = pattern.get("ticker", "")
         cik = pattern.get("cik", "")
 
-        result = db.queries.role_pattern_update(conn, pattern_id, new_pattern, new_user_id)
+        result = db.queries.role_patterns.update(conn, pattern_id, new_pattern, new_name)
         if is_not_ok(result):
             return result
 
         record = {
             "operation": "modify_role_pattern",
-            "uid": pattern.get("uid"),
+            "name": pattern.get("name"),
             "ticker": ticker,
             "cik": cik,
             "status": "modified"
@@ -379,9 +379,9 @@ def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pa
             record["old_pattern"] = pattern.get("pattern", "")
             record["new_pattern"] = new_pattern
 
-        if new_user_id is not None:
-            record["old_uid"] = pattern.get("uid")
-            record["new_uid"] = new_user_id
+        if new_name is not None:
+            record["old_name"] = pattern.get("name")
+            record["new_name"] = new_name
 
         results.append(record)
 
@@ -398,7 +398,7 @@ def _execute_modify_concepts(conn: sqlite3.Connection, patterns: list[dict],
         ticker = pattern.get("ticker", "")
         cik = pattern.get("cik", "")
 
-        result = db.queries.concept_pattern_update(conn, pattern_id, new_name, new_pattern, new_user_id)
+        result = db.queries.concept_patterns.update(conn, pattern_id, new_pattern, new_name, new_user_id)
         if is_not_ok(result):
             return result
 

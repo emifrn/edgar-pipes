@@ -68,7 +68,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         # Get CIK from piped data or explicit ticker
         explicit_ciks = []
         if args.ticker:
-            result = db.queries.entity_select(conn, [args.ticker])
+            result = db.queries.entities.select(conn, [args.ticker])
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -234,7 +234,7 @@ def _get_facts_for_group(
             ctx.mode,
             ctx.end_date
         FROM facts f
-        JOIN filing_roles fr ON f.rid = fr.rid
+        JOIN roles fr ON f.rid = fr.rid
         JOIN filings fi ON fr.access_no = fi.access_no
         JOIN dei d ON fi.access_no = d.access_no
         JOIN concepts c ON f.cid = c.cid
@@ -398,10 +398,14 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
         q4_row = {
             "fiscal_year": fiscal_year,
             "fiscal_period": "Q4",
-            "mode": "flow"
+            "mode": "flow"  # Will be updated below if all concepts are instant
         }
         for concept_name in all_concepts:
             q4_row[concept_name] = None
+
+        # Track if we have any flow variables
+        has_flow = False
+        has_stock = False
 
         # For each concept, try to derive Q4
         for concept_name in all_concepts:
@@ -415,8 +419,10 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
             if is_stock:
                 # Stock variable: just copy FY value
                 q4_row[concept_name] = fy_value
+                has_stock = True
             else:
                 # Flow variable: try to derive Q4
+                has_flow = True
                 # Option 1: Use 9M YTD if available (most common case)
                 ytd_9m_val = ytd_9m_row.get(concept_name)
                 if ytd_9m_val is not None:
@@ -430,6 +436,12 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
                     if q1_val is not None and q2_val is not None and q3_val is not None:
                         q4_row[concept_name] = fy_value - (q1_val + q2_val + q3_val)
                     # Otherwise leave as None (can't derive)
+
+        # Set mode based on what types of concepts we derived
+        # If only stock variables (instant), mark as instant
+        # Otherwise mark as flow (including mixed stock+flow cases)
+        if has_stock and not has_flow:
+            q4_row["mode"] = "instant"
 
         output.append(q4_row)
 

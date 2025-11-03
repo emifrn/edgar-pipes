@@ -52,7 +52,7 @@ def add_arguments(subparsers):
     parser_add_role.add_argument("--from", dest="source_group", help="source group to derive from")
 
     # Selection and filter arguments
-    parser_add_role.add_argument("--uid", "-u", nargs="+", type=int, help="select/filter by user IDs")
+    parser_add_role.add_argument("-n", "--names", nargs="+", help="select/filter by role names")
     parser_add_role.add_argument("--pattern", help="filter by role name regex")
     parser_add_role.add_argument("--exclude", help="exclude by role name regex")
     parser_add_role.set_defaults(func=run)
@@ -85,7 +85,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -100,7 +100,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
         company_name = entity["name"]
 
         # Get target group_id
-        result = db.queries.group_get_id(conn, args.group)
+        result = db.queries.groups.get_id(conn, args.group)
         if is_not_ok(result):
             conn.close()
             return result
@@ -164,7 +164,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
 def run_add_role(cmd: Cmd, args) -> Result[None, str]:
     """
     Link role patterns to a group using one of two modes:
-    1. Direct ID: --id 1 2 3 (no --from)
+    1. Direct names: --names Balance Sheet (no --from)
     2. Derivation: --from Balance [filters...] (filters optional, AND logic)
     """
     try:
@@ -176,7 +176,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entity_select(conn, [args.ticker])
+        result = db.queries.entities.select(conn, [args.ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -191,7 +191,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
         company_name = entity["name"]
 
         # Get target group_id
-        result = db.queries.group_get_id(conn, args.group)
+        result = db.queries.groups.get_id(conn, args.group)
         if is_not_ok(result):
             conn.close()
             return result
@@ -203,13 +203,13 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
 
         # Validate at least one selection method
         has_from = args.source_group is not None
-        has_id = args.uid is not None
+        has_names = hasattr(args, 'names') and args.names is not None
         has_pattern = args.pattern is not None
         has_exclude = args.exclude is not None
 
-        if not has_from and not has_id:
+        if not has_from and not has_names:
             conn.close()
-            return err("add role: must specify --id or --from")
+            return err("add role: must specify --names or --from")
 
         # Validate filters only used with --from
         if not has_from and (has_pattern or has_exclude):
@@ -221,13 +221,13 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
             # Mode 2: Filtered derivation
             result = derive_and_link_roles(
                 conn, target_group_id, cik, args.source_group,
-                user_ids=args.uid,
+                role_names=args.names if has_names else None,
                 pattern=args.pattern,
                 exclude_pattern=args.exclude
             )
         else:
-            # Mode 1: Direct ID linking
-            result = link_roles_by_uid(conn, target_group_id, cik, args.uid)
+            # Mode 1: Direct name linking
+            result = link_roles_by_names(conn, target_group_id, cik, args.names)
 
         if is_not_ok(result):
             conn.close()
@@ -257,7 +257,7 @@ def link_concepts_by_uid(conn: sqlite3.Connection, group_id: int, cik: str, user
     """
     patterns = []
     for user_id in user_ids:
-        result = db.queries.concept_pattern_get_by_uid(conn, cik, user_id)
+        result = db.queries.concept_patterns.get_by_uid(conn, cik, str(user_id))
         if is_not_ok(result):
             return result
 
@@ -270,19 +270,19 @@ def link_concepts_by_uid(conn: sqlite3.Connection, group_id: int, cik: str, user
     return link_patterns_to_group(conn, group_id, patterns, "group_concept_patterns")
 
 
-def link_roles_by_uid(conn: sqlite3.Connection, group_id: int, cik: str, user_ids: list[int]) -> Result[int, str]:
+def link_roles_by_names(conn: sqlite3.Connection, group_id: int, cik: str, names: list[str]) -> Result[int, str]:
     """
-    Link role patterns to group by uid.
+    Link role patterns to group by name.
     """
     patterns = []
-    for user_id in user_ids:
-        result = db.queries.role_pattern_get_by_uid(conn, cik, user_id)
+    for name in names:
+        result = db.queries.role_patterns.get(conn, cik, name)
         if is_not_ok(result):
             return result
 
         pattern = result[1]
         if pattern is None:
-            return err(f"link_roles_by_uid: no role pattern with uid={user_id} for CIK {cik}")
+            return err(f"link_roles_by_names: no role pattern with name='{name}' for CIK {cik}")
 
         patterns.append(pattern)
 
@@ -299,7 +299,7 @@ def link_concepts_by_names(conn: sqlite3.Connection, group_id: int, cik: str, na
     """
     patterns = []
     for name in names:
-        result = db.queries.concept_pattern_get_by_cik_name(conn, cik, name)
+        result = db.queries.concept_patterns.get_by_name(conn, cik, name)
         if is_not_ok(result):
             return result
 
@@ -325,7 +325,7 @@ def derive_and_link_concepts(conn: sqlite3.Connection, target_group_id: int, cik
     All filters use AND logic.
     """
     # Get source group ID
-    result = db.queries.group_get_id(conn, source_group_name)
+    result = db.queries.groups.get_id(conn, source_group_name)
     if is_not_ok(result):
         return result
 
@@ -334,7 +334,7 @@ def derive_and_link_concepts(conn: sqlite3.Connection, target_group_id: int, cik
         return err(f"derive_and_link_concepts: source group '{source_group_name}' not found")
 
     # Get patterns from source group
-    result = db.queries.concept_pattern_select_by_group(conn, source_group_id, cik)
+    result = db.queries.concept_patterns.select_by_group(conn, source_group_id, cik)
     if is_not_ok(result):
         return result
 
@@ -351,14 +351,14 @@ def derive_and_link_concepts(conn: sqlite3.Connection, target_group_id: int, cik
 
 
 def derive_and_link_roles(conn: sqlite3.Connection, target_group_id: int, cik: str,
-                          source_group_name: str, user_ids: list[int] = None,
+                          source_group_name: str, role_names: list[str] = None,
                           pattern: str = None, exclude_pattern: str = None) -> Result[int, str]:
     """
     Derive role patterns from source group and link to target group.
     All filters use AND logic.
     """
     # Get source group ID
-    result = db.queries.group_get_id(conn, source_group_name)
+    result = db.queries.groups.get_id(conn, source_group_name)
     if is_not_ok(result):
         return result
 
@@ -367,14 +367,14 @@ def derive_and_link_roles(conn: sqlite3.Connection, target_group_id: int, cik: s
         return err(f"derive_and_link_roles: source group '{source_group_name}' not found")
 
     # Get patterns from source group
-    result = db.queries.role_pattern_select_by_group(conn, source_group_id, cik)
+    result = db.queries.role_patterns.select_by_group(conn, source_group_id, cik)
     if is_not_ok(result):
         return result
 
     patterns = result[1]
 
     # Apply filters with AND logic
-    filtered = apply_role_filters(patterns, user_ids, pattern, exclude_pattern)
+    filtered = apply_role_filters(patterns, role_names, pattern, exclude_pattern)
 
     if not filtered:
         print(f"Warning: No patterns matched filters from source group '{source_group_name}'", file=sys.stderr)
@@ -424,9 +424,9 @@ def apply_concept_filters(patterns: list[dict],
     return filtered
 
 
-def apply_role_filters(patterns: list[dict], 
-                       user_ids: list[int] = None, 
-                       pattern: str = None, 
+def apply_role_filters(patterns: list[dict],
+                       role_names: list[str] = None,
+                       pattern: str = None,
                        exclude_pattern: str = None) -> list[dict]:
     """
     Apply filters to role patterns using AND logic.
@@ -434,20 +434,19 @@ def apply_role_filters(patterns: list[dict],
     """
     filtered = []
     for p in patterns:
-        # Filter by user_ids (AND)
-        if user_ids is not None:
-            pattern_user_id = p.get("uid")
-            if pattern_user_id not in user_ids:
+        # Filter by role_names (AND)
+        if role_names is not None:
+            if p["name"] not in role_names:
                 continue
 
-        # Filter by pattern regex (AND)
+        # Filter by pattern regex (AND) - matches against role pattern name
         if pattern is not None:
-            if not re.search(pattern, p["pattern"]):
+            if not re.search(pattern, p["name"]):
                 continue
 
-        # Exclude by exclude_pattern regex (AND)
+        # Exclude by exclude_pattern regex (AND) - matches against role pattern name
         if exclude_pattern is not None:
-            if re.search(exclude_pattern, p["pattern"]):
+            if re.search(exclude_pattern, p["name"]):
                 continue
 
         filtered.append(p)
@@ -469,7 +468,7 @@ def link_patterns_to_group(conn: sqlite3.Connection,
     count = 0
     for pattern in patterns:
         if link_table == "group_concept_patterns":
-            result = db.queries.group_concept_pattern_insert_or_ignore(conn, target_group_id, pattern["pid"])
+            result = db.queries.groups.link_concept_pattern(conn, target_group_id, pattern["pid"])
         else:  # group_role_patterns
             link_data = [{"gid": target_group_id, "pid": pattern["pid"]}]
             result = db.store.insert_or_ignore(conn, link_table, link_data)
