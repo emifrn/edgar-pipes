@@ -77,14 +77,6 @@ The goal is for users to develop data-pipelines for the companies they care
 about, gradually building libraries made of curated journals that can be
 replayed as needed.
 
-### Community support
-
-At the time of writing this is a solo-project. However, the Author hopes that
-an open-source Community will eventually gather around this project to develop,
-collect and maintain a large body of company journals enabling newcomers to
-leverage existing work. In such scenario, retrieval of a company financial data
-via shared journals becomes as trivial as running a single update command.
-
 \newpage
 
 ## Key Concepts
