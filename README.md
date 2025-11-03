@@ -50,15 +50,6 @@ users to:
 5. **Update** with latest facts as they become available with new Company filings
 
 
-## Why edgar-pipes?
-
-The XBRL system is vast and complex by design. It must accommodate thousands of
-companies with unique business models and reporting needs. XBRL filings contain
-thousands of concepts with inconsistent naming over time and across companies.
-This flexibility means analysts face a choice: manually investigate every
-naming inconsistency across filings, or limit analysis to generic,
-pre-structured fields.
-
 ## Key Concepts
 
 edgar-pipes uses a three-layer architecture for organizing financial data:
