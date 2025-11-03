@@ -47,15 +47,15 @@ def add_arguments(subparsers):
     parser_group.add_argument("--from", dest="source_group", help="source group to derive from")
 
     # Concept filters (default, common case)
-    parser_group.add_argument("--uid", "-u", nargs="+", type=int, help="filter concepts by user IDs")
-    parser_group.add_argument("--names", nargs="+", help="filter concepts by names")
-    parser_group.add_argument("--pattern", help="filter concepts by name regex")
-    parser_group.add_argument("--exclude", help="exclude concepts by name regex")
+    parser_group.add_argument("--uid", "-u", metavar='X', nargs="+", type=int, help="filter concepts by user IDs")
+    parser_group.add_argument("--pattern", metavar='X', help="filter concepts by name regex")
+    parser_group.add_argument("--exclude", metavar='X', help="exclude concepts by name regex")
+    parser_group.add_argument("--names", metavar='X', nargs="+", help="filter concepts by names")
 
     # Role filters (explicit, edge case)
-    parser_group.add_argument("--role-names", nargs="+", dest="role_names", help="filter roles by names")
-    parser_group.add_argument("--role-pattern", dest="role_pattern", help="filter roles by name regex")
-    parser_group.add_argument("--role-exclude", dest="role_exclude", help="exclude roles by name regex")
+    parser_group.add_argument("--role-pattern", metavar='X', dest="role_pattern", help="filter roles by name regex")
+    parser_group.add_argument("--role-exclude", metavar='X', dest="role_exclude", help="exclude roles by name regex")
+    parser_group.add_argument("--role-names", metavar='X', nargs="+", dest="role_names", help="filter roles by names")
 
     parser_group.set_defaults(func=run)
 

@@ -59,26 +59,6 @@ This flexibility means analysts face a choice: manually investigate every
 naming inconsistency across filings, or limit analysis to generic,
 pre-structured fields.
 
-### The edgar-pipes solution
-
-edgar-pipes takes a different approach: progressive discovery with semantic
-mapping. Instead of choosing between raw complexity and rigid structure,
-define custom patterns that make sense for the analysis at hand. Once defined,
-these patterns remain consistent across time and companies.
-
-This approach enables:
-
-- **Explore before extracting** - See what's in the filings before committing to a structure
-- **Define semantic patterns** - Map varying concept names to consistent labels
-- **Build reusable groups** - Create Balance, Operations, CashFlow templates that work across companies
-- **Automatic updates** - Incremental updates as new filings arrive
-
-The goal is for users to develop data-pipelines for the companies they care
-about, gradually building libraries made of curated journals that can be
-replayed as needed.
-
-\newpage
-
 ## Key Concepts
 
 edgar-pipes uses a three-layer architecture for organizing financial data:
@@ -146,14 +126,13 @@ A group brings together:
 - **Concept patterns**: Define what to extract (which financial metrics)
 - **Hierarchy**: Groups can be derived from parent groups with filtered concepts
 
-Example hierarchy: `Balance` → `Balance.Assets` → `Balance.Assets.Current`
+Example hierarchy: `Balance` -> `Balance.Assets` -> `Balance.Assets.Current`
 
 Multiple groups can share the same role patterns (data scope) while maintaining
 different concept selections. Groups are the unit of extraction and
 reporting. When you run `ep update -g Balance`, edgar-pipes extracts facts
 matching that group's role and concept patterns.
 
-\newpage
 
 ## Quick Start
 
@@ -172,7 +151,8 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
 ### First Run Setup
 
-The first time you run any `ep` command, you'll be prompted to configure your identity for SEC EDGAR API requests:
+The first time you run any `ep` command, you'll be prompted to configure your
+identity for SEC EDGAR API requests:
 
 ```bash
 $ ep probe filings -t AAPL
@@ -200,7 +180,8 @@ nano ~/.config/edgar-pipes/config.toml
 
 ### Working with Multiple Databases
 
-edgar-pipes supports multiple databases for different projects or testing. You can switch databases at three levels:
+edgar-pipes supports multiple databases for different projects or testing. You
+can switch databases at three levels:
 
 ```bash
 # Single command (most temporary)
@@ -217,7 +198,8 @@ ep select filings -t AAPL | ep probe roles
 # path = "/path/to/your/database.db"
 ```
 
-This is useful for separating production data from experiments, or maintaining separate databases for different analysis projects.
+This is useful for separating production data from experiments, or maintaining
+separate databases for different analysis projects.
 
 ### Workflows
 
@@ -233,8 +215,9 @@ ep probe filings -t <TICKER>
 # Explore role names included in the selected filings
 ep select filings -t <TICKER> | ep probe roles
 
-# Preview which roles match the desired pattern
-ep select filings -t <TICKER> | ep select roles -p <REGEX>
+# The number of roles for any filing is typically several hundreds.
+# Define REGEX pattern matching the correct roles across all filings.
+select filings -t <TICKER> | ep select roles -p <REGEX> --cols role_name --uniq --ignore-case
 
 # Create a role pattern to define the data scope
 # This pattern will be shared across related groups
