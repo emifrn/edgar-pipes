@@ -1,7 +1,7 @@
 import re
 import sys
 import sqlite3
-from typing import Any
+from typing import Any, Optional
 
 # Local modules
 from edgar import db
@@ -744,34 +744,33 @@ def _filter_patterns_by_name(patterns: list[dict], pattern: str) -> Result[list[
 def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     """
     Select patterns with flexible filtering:
-    - By group: --ticker + --group (required together unless --uid specified)
-    - By UID: --uid (optional, filters to specific user IDs)
-    - Combination: --ticker + --group + --uid (filters group patterns by UID)
+    - All patterns: ep select patterns --type roles|concepts|all
+    - By ticker: ep select patterns -t TICKER --type roles
+    - By group: ep select patterns -g GROUP --type roles
+    - By ticker+group: ep select patterns -t TICKER -g GROUP
+    - By UID: ep select patterns --uid 1 2 3
     """
 
-    # Validate arguments
-    if not args.uid and (not args.ticker or not args.group):
-        return err("cli.select.select_patterns: --ticker and --group required unless using --uid")
-
-    # When --uid without group: global lookup
-    if args.uid and not args.group:
+    # Route to appropriate fetch strategy
+    if args.uid:
+        # UID-based lookup (concept patterns only)
         result = _fetch_patterns_by_uid(conn, args.uid, args.type, args.ticker)
     else:
-        # Either (ticker+group) or (ticker+group+uid)
-        result = _fetch_patterns_by_group(conn, args.ticker, args.group, args.type, args.uid)
-    
+        # General pattern selection (ticker and/or group optional)
+        result = _fetch_patterns_general(conn, args.ticker, args.group, args.type)
+
     if is_not_ok(result):
         return result
-    
+
     patterns = result[1]
-    
+
     # Apply concept name filtering if specified
     if args.pattern:
         result = _filter_patterns_by_name(patterns, args.pattern)
         if is_not_ok(result):
             return result
         patterns = result[1]
-    
+
     # Consistent columns (only show user-visible IDs)
     # Note: pid is included in data for delete command but hidden from default display
     default_cols = ['uid', 'type', 'ticker', 'cik', 'group_name', 'name', 'pattern']
@@ -779,9 +778,12 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     result = cli.shared.process_cols(patterns, args.cols, default_cols)
     if is_not_ok(result):
         return result
-    patterns, _ = result[1]
+    patterns, valid_cols = result[1]
 
-    return ok({"name": "patterns", "data": patterns})
+    # Rebuild rows with only display columns (exclude internal pid)
+    display_patterns = [{col: row[col] for col in valid_cols if col in row} for row in patterns]
+
+    return ok({"name": "patterns", "data": display_patterns})
 
 
 def format_pattern_record(pattern: dict, pattern_type: str, **kwargs) -> dict:
@@ -798,62 +800,76 @@ def format_pattern_record(pattern: dict, pattern_type: str, **kwargs) -> dict:
     }
 
 
-def _fetch_patterns_by_group(conn: sqlite3.Connection, ticker: str, group: str,
-                            pattern_type: str, user_ids: list[int] = None) -> Result[list[dict], str]:
+def _fetch_patterns_general(conn: sqlite3.Connection, ticker: Optional[str], group: Optional[str],
+                            pattern_type: str) -> Result[list[dict], str]:
     """
-    Fetch patterns for a specific group, optionally filtered by user IDs.
+    Fetch patterns with flexible filtering.
+
+    Args:
+        ticker: Filter by company ticker (None = all companies)
+        group: Filter by group name (None = all groups)
+        pattern_type: Type of patterns to fetch (roles/concepts/all)
+
+    Returns patterns with entity information joined.
     """
-    
-    # Resolve ticker to CIK
-    result = db.queries.entities.get(conn, ticker=ticker)
-    if is_not_ok(result):
-        return result
-    
-    entity = result[1]
-    if not entity:
-        return err(f"_fetch_patterns_by_group: ticker '{ticker}' not found")
-    
-    cik = entity["cik"]
-    ticker = entity["ticker"]
+
+    # Resolve ticker to CIK if provided
+    cik = None
+    if ticker:
+        result = db.queries.entities.get(conn, ticker=ticker)
+        if is_not_ok(result):
+            return result
+
+        entity = result[1]
+        if not entity:
+            return err(f"_fetch_patterns_general: ticker '{ticker}' not found")
+
+        cik = entity["cik"]
+
     patterns = []
-    
+
     # Fetch role patterns
     if pattern_type in ["roles", "all"]:
         result = db.queries.role_patterns.select(conn, group, cik)
         if is_not_ok(result):
             return result
-        
+
         for p in result[1]:
-            # Apply UID filter if specified
-            if user_ids and p.get("uid") not in user_ids:
-                continue
+            # Join entity info for each pattern
+            entity_result = db.queries.entities.get(conn, cik=p["cik"])
+            pattern_ticker = ""
+            if is_ok(entity_result) and entity_result[1]:
+                pattern_ticker = entity_result[1]["ticker"]
 
             patterns.append(format_pattern_record(
                 p, "role",
-                ticker=ticker,
-                cik=cik,
-                group_name=p["group_name"]
+                ticker=pattern_ticker,
+                cik=p["cik"],
+                group_name=p["group_name"],
+                name=p["name"]
             ))
-    
+
     # Fetch concept patterns
     if pattern_type in ["concepts", "all"]:
         result = db.queries.concept_patterns.select(conn, group, cik)
         if is_not_ok(result):
             return result
-        
+
         for p in result[1]:
-            # Apply UID filter if specified
-            if user_ids and p.get("uid") not in user_ids:
-                continue
+            # Join entity info for each pattern
+            entity_result = db.queries.entities.get(conn, cik=p["cik"])
+            pattern_ticker = ""
+            if is_ok(entity_result) and entity_result[1]:
+                pattern_ticker = entity_result[1]["ticker"]
 
             patterns.append(format_pattern_record(
                 p, "concept",
-                ticker=ticker,
-                cik=cik,
+                ticker=pattern_ticker,
+                cik=p["cik"],
                 group_name=p["group_name"],
                 name=p["name"]
             ))
-    
+
     return ok(patterns)
 
 

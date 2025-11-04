@@ -119,13 +119,25 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
     """
     Get concept patterns with optional filters. Includes group name in results.
 
-    This is used by select.py for pattern display with group context.
+    Uses LEFT JOIN to include patterns not yet linked to any group.
+    When multiple groups are linked to one pattern, they're concatenated with commas.
+
+    Args:
+        group_name: Filter to specific group (None = all groups)
+        cik: Filter to specific company (None = all companies)
+
+    Returns patterns with empty group_name for unlinked patterns.
     """
     base_query = """
-        SELECT cp.pid, cp.cik, cp.name, cp.pattern, cp.uid, g.name as group_name
+        SELECT cp.pid,
+               cp.cik,
+               cp.name,
+               cp.pattern,
+               cp.uid,
+               COALESCE(GROUP_CONCAT(DISTINCT g.name), '') as group_name
         FROM concept_patterns cp
-        JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
-        JOIN groups g ON gcp.gid = g.gid
+        LEFT JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
+        LEFT JOIN groups g ON gcp.gid = g.gid
         """
 
     where_clauses = []
@@ -143,6 +155,8 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
         query = base_query + " WHERE " + " AND ".join(where_clauses)
     else:
         query = base_query
+
+    query += " GROUP BY cp.pid, cp.cik, cp.name, cp.pattern, cp.uid"
 
     return db.store.select(conn, query, tuple(params))
 

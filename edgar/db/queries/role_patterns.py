@@ -102,17 +102,24 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
     """
     Get role patterns with optional filters. Includes group name in results.
 
-    This is used by select.py for pattern display with group context.
+    Uses LEFT JOIN to include patterns not yet linked to any group.
+    When multiple groups are linked to one pattern, they're concatenated with commas.
+
+    Args:
+        group_name: Filter to specific group (None = all groups)
+        cik: Filter to specific company (None = all companies)
+
+    Returns patterns with empty group_name for unlinked patterns.
     """
     base_query = """
-        SELECT rp.pid, 
-               rp.cik, 
-               rp.name, 
-               rp.pattern, 
-               g.name as group_name
+        SELECT rp.pid,
+               rp.cik,
+               rp.name,
+               rp.pattern,
+               COALESCE(GROUP_CONCAT(DISTINCT g.name), '') as group_name
         FROM role_patterns rp
-        JOIN group_role_patterns grp ON rp.pid = grp.pid
-        JOIN groups g ON grp.gid = g.gid
+        LEFT JOIN group_role_patterns grp ON rp.pid = grp.pid
+        LEFT JOIN groups g ON grp.gid = g.gid
         """
     where_clauses = []
     params = []
@@ -129,6 +136,8 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
         query = base_query + " WHERE " + " AND ".join(where_clauses)
     else:
         query = base_query
+
+    query += " GROUP BY rp.pid, rp.cik, rp.name, rp.pattern"
 
     return db.store.select(conn, query, tuple(params))
 
