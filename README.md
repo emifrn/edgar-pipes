@@ -10,13 +10,13 @@
 ## What is edgar-pipes?
 
 edgar-pipes (ep) is a CLI tool for extracting financial data from SEC EDGAR
-filings. The command fetches companies' filing information and automatically
-stores it in a local SQLite3 database for persistence and fast retrieval. It
-uses the EDGAR API and leverages Arelle, an open-source XBRL library, for the
-extraction of selected financial data.
+filings. The command fetches companies' filing information and stores it in a
+local SQLite3 database for persistence and fast retrieval. It uses the EDGAR
+API and leverages Arelle, an open-source XBRL library, for the extraction of
+selected financial data.
 
-The command is designed to operate with Linux pipes ('|'), where the output of
-a subcommand becomes the input of the next one. This mechanism enables
+The ep command is designed to operate with Linux pipes ('|'), where the output
+of a subcommand becomes the input of the next one. This mechanism enables
 composable and highly adaptable data-pipelines with zero programming
 requirements. This approach shifts the focus from building software for
 financial data extraction to a more interactive exploration of financial
@@ -25,11 +25,11 @@ analysis and reporting solutions.
 
 The typical edgar-pipes workflow includes subcommands that **probe** XBRL
 filings via EDGAR API. **Select** tags with their historical variations via
-pattern matching across filings. Create **new** user defined groups that stay
-consistent over time and across filings. **Update** a local SQLite3 database
-with the latest XBRL facts, and **report** financial data based on previously
-defined groups, e.g. 'Balance', 'Balance.Assets', 'Balance.Assets.Current',
-'Operations', 'CashFlow', etc. etc. 
+pattern matching across filings. Create **new** user defined groups for
+consistent data retrieval over time and across companies. **Update** a local
+SQLite3 database with the latest XBRL facts, and **report** financial data
+based on previously defined groups, e.g. 'Balance', 'Balance.Assets',
+'Balance.Assets.Current', 'Operations', 'CashFlow', etc. etc. 
 
 ### Reproducible workflows
 
@@ -61,12 +61,12 @@ documents, presentation roles (also called role URIs or networks) organize
 financial data into sections like balance sheets, income statements, cash flow
 statements and many more. Each role has a URI identifier such as
 `http://company.com/role/ConsolidatedBalanceSheets`. However, role URIs often
-change between filings—even for the same company—as reporting structures are
+change between filings, even for the same company, as reporting structures are
 refined. 
 
 A role in edgar-pipes consists of:
 
-- **name**: A semantic label (e.g., "Balance Sheet")
+- **name**: A user defined semantic label (e.g., "Balance Sheet")
 - **pattern**: A regex that matches role URIs (e.g., `".*BalanceSheet.*"`)
 
 Pattern matching ensures data extraction remains consistent across time,
@@ -83,7 +83,7 @@ Define **what** to extract (which financial metrics). In XBRL, concepts are
 the fundamental data elements that represent financial line items like
 "CashAndCashEquivalentsAtCarryingValue", "RevenueFromContractWithCustomerExcludingAssessedTax",
 or "AccountsPayableCurrent". Each concept has a tag name from a taxonomy
-(typically US GAAP) that identifies what the number represents.
+(typically US-GAAP) that identifies what the number represents.
 
 However, concept tags frequently change between companies reporting similar
 items. For example, "Cash" might appear as `CashAndCashEquivalents`,
@@ -93,7 +93,7 @@ and company choice.
 
 A concept pattern in edgar-pipes consists of:
 
-- **name**: A semantic label meaningful to you (e.g., "Cash", "Revenue")
+- **name**: A user-defined semantic label (e.g., "Cash", "Revenue")
 - **pattern**: A regex matching concept tags (e.g., `"^CashAndCashEquivalents.*$"`)
 - **uid**: A user-assigned numeric ID for easy reference
 
@@ -121,8 +121,8 @@ Example hierarchy: `Balance` -> `Balance.Assets` -> `Balance.Assets.Current`
 
 Multiple groups can share the same role patterns (data scope) while maintaining
 different concept selections. Groups are the unit of extraction and
-reporting. When you run `ep update -g Balance`, edgar-pipes extracts facts
-matching that group's role and concept patterns.
+reporting. When you run `ep update -t AAPL -g Balance`, edgar-pipes extracts
+facts matching that group's role and concept patterns for the given ticker.
 
 
 ## Quick Start
@@ -200,43 +200,50 @@ When analyzing a new company for the first time without any pre-existing
 references, follow this process:
 
 ```bash
-# Discover what filings are available
+# 1. Discover what filings are available for a given company, identified by its ticker
 ep probe filings -t <TICKER>
 
-# Explore role names included in the selected filings
+# 2. Explore role names included in the selected filings
 ep select filings -t <TICKER> | ep probe roles
 
-# The number of roles for any filing is typically several hundreds.
-# Define REGEX pattern matching the correct roles across all filings.
-select filings -t <TICKER> | ep select roles -p <REGEX> --cols role_name --uniq --ignore-case
-
-# Create a role pattern to define the data scope
-# This pattern will be shared across related groups
-ep new role -t <TICKER> -n <NAME> -p <REGEX> 
-
-# Create a group and link it to the role pattern by name
+# 3. Create group (container for role and concept patterns)
+# A group typically contains one role pattern and many concept patterns
+# Groups can be created before patterns are defined
 ep new group Balance
-ep add role -g Balance -t <TICKER> -n <NAME>
 
-# Probe what concepts are available in the group's roles
+# 4. Find role pattern by filtering role names
+# The number of roles in any filing is typically in the hundreds
+# Start with a broad pattern to see what matches (e.g., '.*balance.*')
+ep select filings -t <TICKER> | ep select roles -p '.*balance.*' --cols role_name --uniq --ignore-case
+
+# 5. Once you've identified the right pattern, create a named role pattern
+# This pattern will match role URIs across all filings and can be shared across related groups
+ep new role -t <TICKER> -n balance -p '<REFINED_REGEX>'
+
+# 6. Link the role pattern to your group
+# Role names are not unique across companies, so --ticker is needed to disambiguate
+ep add role -t <TICKER> -n balance -g Balance
+
+# 7. Import concepts from the matched roles into local database
+# All operations retrieving data via EDGAR public API use the probe command
 ep select filings -t <TICKER> | ep select roles -g Balance | ep probe concepts
 
-# Inspect concept tags to find patterns
+# 8. Inspect concept tags to identify patterns (excluding the header row)
 ep select filings -t <TICKER> | ep select roles -g Balance | \
-ep --table select concepts --cols tag | sort | uniq | grep -v tag
+ep --table select concepts --cols tag | sort | uniq | grep -v '^tag$'
 
-# Create patterns for the desired financial metrics
+# 9. Create concept patterns for desired financial metrics
 ep new concept -t <TICKER> -n "Accounts payable" -p "^AccountsPayableCurrent$" -u 1
 ep new concept -t <TICKER> -n "Cash" -p "^CashAndCashEquivalents.*$" -u 2
 # ... create more concept patterns ...
 
-# Link concept patterns to the desired groups
+# 10. Link concept patterns to the group
 ep add concept -t <TICKER> -g Balance -u 1 2
 
-# Extract facts into database
+# 11. Extract facts into database
 ep update -t <TICKER> -g Balance
 
-# Generate reports
+# 12. Generate reports
 ep report -t <TICKER> -g Balance --quarterly
 ```
 
@@ -369,8 +376,6 @@ ep report -t AEO -g Operations.PerShare --quarterly
 ep stats concepts -t AEO -g Balance --limit 20
 ```
 
-\newpage
-
 ## Commands Overview
 
 More commands are available with edgar-pipes. For additional information and
@@ -392,7 +397,6 @@ examples, refer to each command help section, e.g. "ep delete -h".
 | `journal` | Track command history |
 | `history` | View command session history |
 
-
 ## Requirements
 
 - **Platform**: Linux, macOS, or WSL (Windows not supported)
@@ -401,8 +405,6 @@ examples, refer to each command help section, e.g. "ep delete -h".
 
 edgar-pipes is designed around Unix pipes and shell scripting. Native Windows
 is not supported.
-
-\newpage
 
 ## Contributing
 
