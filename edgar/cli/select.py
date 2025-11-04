@@ -193,6 +193,7 @@ def _parse_date_filters(date_args: list[str] | None) -> list[tuple[str, str, str
 def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     """
     Select filings with specified filters and return command data.
+    If no CIK filter provided (no ticker, no stdin data), returns all filings.
     """
 
     # Convert explicit ticker to CIKs if provided
@@ -205,12 +206,11 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
         if not entities:
             return err(f"cli.select.select_filings: ticker '{args.ticker}' not found in database")
         explicit_ciks = [e['cik'] for e in entities]
-    
+
     ciks = cli.shared.merge_stdin_field("cik", cmd["data"], explicit_ciks)
-    if ciks is None:
-        return ok({"name": "filings", "data": []})
-    
+
     # Execute database query
+    # If ciks is None, select_by_entity will return all filings
     date_filters = _parse_date_filters(args.date)
     result = db.queries.filings.select_by_entity(conn,
                                                  ciks = ciks,
@@ -219,9 +219,9 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
                                                  stubs_only = args.stubs)
     if is_not_ok(result):
         return result
-    
+
     filings = result[1]
-    
+
     # Apply limit if specified
     if args.limit:
         filings = filings[:args.limit]
@@ -231,9 +231,9 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
     result = cli.shared.process_cols(filings, args.cols, default_cols)
     if is_not_ok(result):
         return result
-    
+
     filings, _ = result[1]
-    
+
     return ok({"name": "filings", "data": filings})
 
 
