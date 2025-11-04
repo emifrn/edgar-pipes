@@ -74,7 +74,7 @@ def add_arguments(subparsers):
     parser_patterns.add_argument("-p", "--pattern", metavar='X', help="regex pattern to filter concept names (concept patterns only)")
     parser_patterns.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
     parser_patterns.add_argument("--uid", "-u", nargs="+", type=int, metavar='X', help="user IDs to select")
-    parser_patterns.add_argument("--type", metavar='X', choices=["roles", "concepts", "all"], default="all", help="pattern type to show")
+    parser_patterns.add_argument("--type", metavar='X', choices=["roles", "concepts", "all"], default="all", help="pattern type to show, valid choices: roles, concepts, all. Default: all")
     parser_patterns.set_defaults(func=run)
 
 
