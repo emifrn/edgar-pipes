@@ -4,6 +4,7 @@ CLI: config
 Manage edgar-pipes configuration.
 """
 
+import os
 import sys
 from edgar import config as cfg
 from edgar.cli.shared import Cmd
@@ -19,13 +20,19 @@ def add_arguments(subparsers):
     parser_show = config_subparsers.add_parser("show", help="show current configuration")
     parser_show.set_defaults(func=run)
 
+    # config env
+    parser_env = config_subparsers.add_parser("env", help="show environment variables and configuration sources")
+    parser_env.set_defaults(func=run)
+
 
 def run(cmd: Cmd, args) -> Result[None, str]:
     """Route to appropriate config subcommand."""
     if args.config_cmd == 'show':
         return run_show(cmd, args)
+    elif args.config_cmd == 'env':
+        return run_show_env(cmd, args)
     else:
-        print("Usage: ep config show", file=sys.stderr)
+        print("Usage: ep config show|env", file=sys.stderr)
         return ok(None)
 
 
@@ -64,6 +71,30 @@ def run_show(cmd: Cmd, args) -> Result[None, str]:
     print(f"  path = {journal_path}{journal_info}", file=sys.stderr)
     print(f"\n[output]", file=sys.stderr)
     print(f"  theme = \"{config['output']['theme']}\"\n", file=sys.stderr)
+
+    return ok(None)
+
+
+def run_show_env(cmd: Cmd, args) -> Result[None, str]:
+    """Show environment variables."""
+    # Check which environment variables are set
+    env_vars = {
+        "EDGAR_PIPES_USER_AGENT": os.getenv("EDGAR_PIPES_USER_AGENT"),
+        "EDGAR_PIPES_DB_PATH": os.getenv("EDGAR_PIPES_DB_PATH"),
+        "EDGAR_PIPES_JOURNAL_PATH": os.getenv("EDGAR_PIPES_JOURNAL_PATH"),
+        "EDGAR_PIPES_THEME": os.getenv("EDGAR_PIPES_THEME"),
+        "XDG_CONFIG_HOME": os.getenv("XDG_CONFIG_HOME"),
+    }
+
+    # Print environment variables
+    print("\nEnvironment Variables", file=sys.stderr)
+    print("=" * 50, file=sys.stderr)
+    for var_name, var_value in env_vars.items():
+        if var_value:
+            print(f"  {var_name}={var_value}", file=sys.stderr)
+        else:
+            print(f"  {var_name} (not set)", file=sys.stderr)
+    print(file=sys.stderr)
 
     return ok(None)
 
