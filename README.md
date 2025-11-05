@@ -327,8 +327,8 @@ ep journal current
 # Replay all commands from a journal
 ep journal replay
 
-# Replay specific commands 
-ep journal replay 5-10,13,15,18-22
+# Replay specific commands
+ep journal replay 5:10,13,15,18:22
 
 # Switch to a different journal
 ep journal use <JOURNAL_NAME>

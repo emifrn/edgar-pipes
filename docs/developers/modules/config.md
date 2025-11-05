@@ -117,9 +117,32 @@ Shows:
 - All configuration sections with current values
 - Database file path and size (if exists)
 - Journal directory path and count (if exists)
-- Which values come from env vars vs config file
 
-Output example:
+**ep config env** - Display environment variables
+
+Shows which EDGAR_PIPES environment variables are currently set:
+- EDGAR_PIPES_USER_AGENT
+- EDGAR_PIPES_DB_PATH
+- EDGAR_PIPES_JOURNAL_PATH
+- EDGAR_PIPES_THEME
+- XDG_CONFIG_HOME
+
+Useful for debugging configuration precedence and checking which values
+are being overridden by environment variables
+
+Output example for `ep config env`:
+
+```
+Environment Variables
+==================================================
+  EDGAR_PIPES_USER_AGENT (not set)
+  EDGAR_PIPES_DB_PATH=/home/user/project/data.db
+  EDGAR_PIPES_JOURNAL_PATH (not set)
+  EDGAR_PIPES_THEME (not set)
+  XDG_CONFIG_HOME (not set)
+```
+
+Output example for `ep config show`:
 
 ```
 Edgar-pipes Configuration
@@ -149,6 +172,12 @@ Config file: ~/.config/edgar-pipes/config.toml ✓
 3. Checks file/directory existence
 4. Formats and displays configuration
 5. Shows additional info (file sizes, journal counts)
+
+**run_show_env(cmd, args)** - Show environment variables handler
+
+1. Checks which EDGAR_PIPES environment variables are set
+2. Displays each variable with its value or "(not set)"
+3. Useful for debugging configuration precedence issues
 
 **format_size(size_bytes)** - Human-readable file sizes
 

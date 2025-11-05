@@ -216,17 +216,16 @@ def journal_status() -> Result[None, str]:
 def get_status_bar() -> str:
     """
     Generate status bar line showing current journal and recording state.
-    Returns colored string ready for stderr output.
+    Returns colored string ready for stderr output, or empty string if recording is off.
     """
-    current_journal = get_current_journal_name()
-    
-    # Choose indicator based on silent mode
+    # Only show status bar when recording is enabled
     if is_silent():
-        indicator = "\033[90m○\033[0m"  # Dim gray hollow circle
-    else:
-        indicator = "\033[90m●\033[0m"  # Dim gray filled circle
-    
-    # Format: ○/● journal: name
+        return ""
+
+    current_journal = get_current_journal_name()
+    indicator = "\033[90m●\033[0m"  # Dim gray filled circle
+
+    # Format: ● journal: name
     return f"{indicator} \033[90mjournal: {current_journal}\033[0m"
 
 

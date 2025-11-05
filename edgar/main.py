@@ -73,7 +73,9 @@ def cli_main(args):
     try:
         current_cmd = pipeline.build_current_command()
         if cli.journal.should_journal_command(current_cmd) and sys.stdin.isatty():
-            print(cli.journal.get_status_bar(), file=sys.stderr)
+            status_bar = cli.journal.get_status_bar()
+            if status_bar:
+                print(status_bar, file=sys.stderr)
 
         # Read packet from previous pipeline stage
         stdin_result = pipeline.read()
@@ -196,12 +198,13 @@ Environment variables:
 
 Configuration:
   Config file: ~/.config/edgar-pipes/config.toml
-  Use "ep config show" to view current configuration
+  Use "ep config show" to view configuration
+  Use "ep config env" to view environment variables
 
 Examples:
   ep probe filings -t AAPL --force
   ep select patterns -t AEO -g Balance
-  ep new "Current Assets" --from Balance -t AEO --id 1 2 3
+  ep new group "Current Assets" --from Balance -t AEO --uid 1 2 3
   ep select concepts -t AAPL | ep delete -y
   ep select filings -t AEO | select roles -g Balance | probe concepts
 
