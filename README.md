@@ -81,8 +81,9 @@ Role patterns are:
 
 Define **what** to extract (which financial metrics). In XBRL, concepts are
 the fundamental data elements that represent financial line items like
-"CashAndCashEquivalentsAtCarryingValue", "RevenueFromContractWithCustomerExcludingAssessedTax",
-or "AccountsPayableCurrent". Each concept has a tag name from a taxonomy
+"CashAndCashEquivalentsAtCarryingValue",
+"RevenueFromContractWithCustomerExcludingAssessedTax", or
+"AccountsPayableCurrent". Each concept has a tag name from a taxonomy
 (typically US-GAAP) that identifies what the number represents.
 
 However, concept tags frequently change between companies reporting similar
@@ -216,7 +217,7 @@ ep new group Balance
 # Start with a broad pattern to see what matches (e.g., '.*balance.*')
 ep select filings -t <TICKER> | ep select roles -p '.*balance.*' --cols role_name --uniq --ignore-case
 
-# 5. Once you've identified the right pattern, create a named role pattern
+# 5. Once you've identified the right pattern, create a named role-pattern
 # This pattern will match role URIs across all filings and can be shared across related groups
 ep new role -t <TICKER> -n balance -p '<REFINED_REGEX>'
 

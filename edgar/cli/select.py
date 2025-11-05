@@ -35,29 +35,49 @@ def add_arguments(subparsers):
     
     # Roles subcommand
     parser_roles = select_subparsers.add_parser("roles", help="filter XBRL roles by pattern")
-    parser_roles.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol")
-    parser_roles.add_argument("-a", "--access", metavar="X", help="SEC accession number (e.g., 0000320193-24-000007)")
-    parser_roles.add_argument("-p", "--pattern", metavar="X", help="role names regex pattern")
-    parser_roles.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
-    parser_roles.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
-    parser_roles.add_argument("-c", "--cols", metavar="X", nargs="+", help="columns to include in output")
-    parser_roles.add_argument("-m", "--missing", action="store_true", help="show filings that have no roles matching the criteria")
-    parser_roles.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
+
+    # Data sources
+    group_sources = parser_roles.add_argument_group('data sources')
+    group_sources.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol")
+    group_sources.add_argument("-a", "--access", metavar="X", help="SEC accession number (e.g., 0000320193-24-000007)")
+    group_sources.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
+
+    # Filtering
+    group_filters = parser_roles.add_argument_group('filtering')
+    group_filters.add_argument("-p", "--pattern", metavar="X", help="role names regex pattern")
+    group_filters.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
+
+    # Output control
+    group_output = parser_roles.add_argument_group('output control')
+    group_output.add_argument("-c", "--cols", metavar="X", nargs="+", help="columns to include in output")
+    group_output.add_argument("-m", "--missing", action="store_true", help="show filings that have no roles matching the criteria")
+    group_output.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
+
     parser_roles.set_defaults(func=run)
 
     # Concepts subcommand
     parser_concepts = select_subparsers.add_parser("concepts", help="filter financial concepts")
-    parser_concepts.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol for group-based queries")
-    parser_concepts.add_argument("-a", "--access", metavar="X", help="SEC accession number")
-    parser_concepts.add_argument("-r", "--role", metavar="X", help="specific role name")
-    parser_concepts.add_argument("-p", "--pattern", metavar="X", help="regex pattern for concept tags")
-    parser_concepts.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
-    parser_concepts.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
-    parser_concepts.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
-    parser_concepts.add_argument("-n", "--name", metavar="X", help="semantic concept name filter (e.g., 'cash', 'inventory')")
-    parser_concepts.add_argument("--label", action="store_true", help="search concept labels instead of tags")
-    parser_concepts.add_argument("-m", "--missing", action="store_true", help="show filing-role pairs that have no concepts matching the criteria")
-    parser_concepts.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
+
+    # Data sources
+    group_sources = parser_concepts.add_argument_group('data sources')
+    group_sources.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol for group-based queries")
+    group_sources.add_argument("-a", "--access", metavar="X", help="SEC accession number")
+    group_sources.add_argument("-r", "--role", metavar="X", help="specific role name")
+    group_sources.add_argument("-g", "--group", metavar="X", help="logical group name for pattern-based filtering")
+
+    # Filtering
+    group_filters = parser_concepts.add_argument_group('filtering')
+    group_filters.add_argument("-p", "--pattern", metavar="X", help="regex pattern for concept tags")
+    group_filters.add_argument("-n", "--name", metavar="X", help="semantic concept name filter (e.g., 'cash', 'inventory')")
+    group_filters.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
+    group_filters.add_argument("-l", "--label", action="store_true", help="search concept labels instead of tags")
+
+    # Output control
+    group_output = parser_concepts.add_argument_group('output control')
+    group_output.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
+    group_output.add_argument("-m", "--missing", action="store_true", help="show filing-role pairs that have no concepts matching the criteria")
+    group_output.add_argument("-u", "--uniq", action="store_true", help="show only unique values (removes duplicates)")
+
     parser_concepts.set_defaults(func=run)
 
     # Groups subcommand
