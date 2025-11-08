@@ -231,21 +231,21 @@ ep select filings -t <TICKER> | ep select roles -g Balance | ep probe concepts
 
 # 8. Inspect concept tags to identify patterns
 # View all unique concept tags across matching filing-roles
-ep select filings -t <TICKER> | ep select roles -g Balance | \
-ep --table select concepts -c tag -u
+ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -c tag -u
 
-# Check pattern coverage by identifying gaps (filing-roles missing specific concepts)
-# Empty result means full coverage; any rows indicate the pattern needs refinement
-# or the concept doesn't appear consistently across all filings
-ep select filings -t <TICKER> | ep select roles -g Balance | \
-ep select concepts -p 'cash' -i -m
+# Check pattern coverage by identifying gaps (filing-roles missing specific
+# concepts) using option -m. Empty result means full coverage; any rows indicate
+# the pattern needs refinement or the concept doesn't appear consistently across
+# all filings.
+ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -p 'Cash' -i -m
 
-# 9. Create concept patterns for desired financial metrics
-ep new concept -t <TICKER> -n "Accounts payable" -p "^AccountsPayableCurrent$" -u 1
-ep new concept -t <TICKER> -n "Cash" -p "^CashAndCashEquivalents.*$" -u 2
+# 9. Create concept patterns for desired financial metrics. The option -u
+# associates a "user-id" to a concept for easier reference and bulk operations.
+ep new concept -t <TICKER> -n "Cash" -p "^CashAndCashEquivalents.*$" -u 1
+ep new concept -t <TICKER> -n "Accounts payable" -p "^AccountsPayableCurrent$" -u 2
 # ... create more concept patterns ...
 
-# 10. Link concept patterns to the group
+# 10. Link concept patterns to group
 ep add concept -t <TICKER> -g Balance -u 1 2
 
 # 11. Extract facts into database
