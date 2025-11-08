@@ -229,9 +229,16 @@ ep add role -t <TICKER> -n balance -g Balance
 # All operations retrieving data via EDGAR public API use the probe command
 ep select filings -t <TICKER> | ep select roles -g Balance | ep probe concepts
 
-# 8. Inspect concept tags to identify patterns (excluding the header row)
+# 8. Inspect concept tags to identify patterns
+# View all unique concept tags across matching filing-roles
 ep select filings -t <TICKER> | ep select roles -g Balance | \
-ep --table select concepts --cols tag | sort | uniq | grep -v '^tag$'
+ep --table select concepts -c tag -u
+
+# Check pattern coverage by identifying gaps (filing-roles missing specific concepts)
+# Empty result means full coverage; any rows indicate the pattern needs refinement
+# or the concept doesn't appear consistently across all filings
+ep select filings -t <TICKER> | ep select roles -g Balance | \
+ep select concepts -p 'cash' -i -m
 
 # 9. Create concept patterns for desired financial metrics
 ep new concept -t <TICKER> -n "Accounts payable" -p "^AccountsPayableCurrent$" -u 1
