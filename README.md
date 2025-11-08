@@ -332,6 +332,12 @@ ep journal list
 # View current journal entries
 ep journal current
 
+# Suspend journal recording
+ep journal off
+
+# Resume journal recording
+ep journal on
+
 # Replay all commands from a journal
 ep journal replay
 
