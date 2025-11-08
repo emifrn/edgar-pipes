@@ -726,7 +726,7 @@ def select_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
             })
         
         # Apply column processing with role columns
-        default_cols = ['name', 'ticker', 'cik', 'access_no', 'filing_date', 'form_type', 'role_name']
+        default_cols = ['access_no', 'filing_date', 'form_type', 'role_name']
         result = cli.shared.process_cols(missing_roles, args.cols, default_cols)
         if is_not_ok(result):
             return result
