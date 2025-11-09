@@ -51,6 +51,16 @@ db/
 
 ## Schema notes
 
+### role_patterns table
+
+The `role_patterns` table stores regex patterns for matching XBRL role names:
+
+- `pid` - Pattern ID (primary key)
+- `cik` - Company identifier (foreign key to entities)
+- `name` - Semantic label for the pattern
+- `pattern` - Regex pattern text
+- `note` - Optional documentation field explaining the pattern rationale
+
 ### concept_patterns table
 
 The `concept_patterns` table stores regex patterns for matching XBRL concept tags:

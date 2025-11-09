@@ -37,6 +37,7 @@ def add_arguments(subparsers):
     parser_role.add_argument("-t", "--ticker", metavar="X", required=True, help="company ticker symbol")
     parser_role.add_argument("-n", "--name", metavar="X", required=True, help="role pattern name")
     parser_role.add_argument("-p", "--pattern", metavar="X", required=True, help="regex pattern")
+    parser_role.add_argument("--note", metavar="X", help="optional note describing the pattern rationale")
     parser_role.set_defaults(func=run)
 
     # new group
@@ -174,9 +175,9 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         cik = entity["cik"]
         company_name = entity["name"]
 
-        # Insert role pattern with name
+        # Insert role pattern with note
         result = db.queries.role_patterns.insert(
-            conn, cik, args.name, args.pattern
+            conn, cik, args.name, args.pattern, args.note
         )
         if is_not_ok(result):
             conn.close()
@@ -188,6 +189,8 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         print(f"Created role pattern '{args.name}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
         print(f"Pattern ID: {pattern_id}, CIK: {cik}", file=sys.stderr)
         print(f"Pattern: {args.pattern}", file=sys.stderr)
+        if args.note:
+            print(f"Note: {args.note}", file=sys.stderr)
 
         conn.close()
         return ok(None)

@@ -34,6 +34,7 @@ def get_with_entity(conn: sqlite3.Connection, cik: Optional[str], name: str) -> 
                 rp.cik,
                 rp.pattern,
                 rp.name,
+                rp.note,
                 e.ticker,
                 e.name as company_name
         FROM role_patterns rp
@@ -59,11 +60,12 @@ def get(conn: sqlite3.Connection, cik: str, name: str) -> Result[Optional[dict[s
     Get role pattern by CIK and name.
     """
     query = """
-        SELECT pid, 
-               cik, 
-               pattern, 
-               name 
-        FROM role_patterns 
+        SELECT pid,
+               cik,
+               pattern,
+               name,
+               note
+        FROM role_patterns
         WHERE cik = ? AND name = ?
         """
     result = db.store.select(conn, query, (cik, name))
@@ -84,7 +86,8 @@ def select_by_group(conn: sqlite3.Connection, gid: int, cik: Optional[str] = Non
         SELECT  rp.pid,
                 rp.cik,
                 rp.name,
-                rp.pattern
+                rp.pattern,
+                rp.note
         FROM role_patterns rp
         JOIN group_role_patterns grp ON rp.pid = grp.pid
         WHERE grp.gid = ?
@@ -116,6 +119,7 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
                rp.cik,
                rp.name,
                rp.pattern,
+               rp.note,
                COALESCE(GROUP_CONCAT(DISTINCT g.name), '') as group_name
         FROM role_patterns rp
         LEFT JOIN group_role_patterns grp ON rp.pid = grp.pid
@@ -137,12 +141,12 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
     else:
         query = base_query
 
-    query += " GROUP BY rp.pid, rp.cik, rp.name, rp.pattern"
+    query += " GROUP BY rp.pid, rp.cik, rp.name, rp.pattern, rp.note"
 
     return db.store.select(conn, query, tuple(params))
 
 
-def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str) -> Result[int, str]:
+def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str, note: Optional[str] = None) -> Result[int, str]:
     """
     Insert role pattern (without OR IGNORE).
 
@@ -150,8 +154,8 @@ def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str) -> Resul
     Returns pattern ID.
     """
     try:
-        query = "INSERT INTO role_patterns (cik, name, pattern) VALUES (?, ?, ?)"
-        cursor = conn.execute(query, (cik, name, pattern))
+        query = "INSERT INTO role_patterns (cik, name, pattern, note) VALUES (?, ?, ?, ?)"
+        cursor = conn.execute(query, (cik, name, pattern, note))
         pid = cursor.lastrowid
         conn.commit()
         cursor.close()
@@ -162,7 +166,7 @@ def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str) -> Resul
         return err(f"queries.role_patterns.insert: sqlite error: {e}")
 
 
-def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, name: Optional[str] = None) -> Result[int, str]:
+def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, name: Optional[str] = None, note: Optional[str] = None) -> Result[int, str]:
     """
     Update role pattern.
 
@@ -179,6 +183,10 @@ def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, na
     if name is not None:
         updates.append("name = ?")
         params.append(name)
+
+    if note is not None:
+        updates.append("note = ?")
+        params.append(note)
 
     if not updates:
         return ok(0)  # Nothing to update

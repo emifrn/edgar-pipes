@@ -255,6 +255,7 @@ def _preview_patterns(patterns: list[dict]) -> list[dict]:
                 "uid": pattern.get("uid"),
                 "group_name": pattern["group_name"],
                 "pattern": pattern["pattern"],
+                "note": pattern.get("note", ""),
                 "status": "dry-run",
             })
         else:  # concept pattern
@@ -288,6 +289,7 @@ def _delete_patterns(conn: sqlite3.Connection, patterns: list[dict]) -> Result[l
                 "uid": pattern.get("uid"),
                 "group_name": pattern["group_name"],
                 "pattern": pattern["pattern"],
+                "note": pattern.get("note", ""),
                 "status": "deleted"
             })
         else:

@@ -123,6 +123,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 cik             TEXT NOT NULL,
                 name            TEXT NOT NULL,
                 pattern         TEXT NOT NULL,
+                note            TEXT,
                 FOREIGN KEY (cik) REFERENCES entities(cik) ON DELETE CASCADE,
                 UNIQUE (cik, name)
             );

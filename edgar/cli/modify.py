@@ -35,6 +35,7 @@ def add_arguments(subparsers):
     parser_role.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
     parser_role.add_argument("--pattern", help="new regex pattern")
     parser_role.add_argument("--new-name", dest="new_name", help="new pattern name")
+    parser_role.add_argument("--note", help="new or updated note describing the pattern rationale")
     parser_role.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_role.set_defaults(func=run)
 
@@ -111,8 +112,8 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Modify role pattern regexes and/or name with preview/execute workflow."""
 
     # Validate at least one modification field provided
-    if not args.pattern and args.new_name is None:
-        return err("modify role: must provide --pattern, --new-name, or both")
+    if not args.pattern and args.new_name is None and not args.note:
+        return err("modify role: must provide --pattern, --new-name, --note, or combination")
 
     # Validate regex if provided
     if args.pattern:
@@ -169,9 +170,9 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
         # Preview or execute
         if args.yes:
-            result = _execute_modify_roles(conn, patterns, args.pattern, args.new_name)
+            result = _execute_modify_roles(conn, patterns, args.pattern, args.new_name, args.note)
         else:
-            result = _preview_modify_roles(patterns, args.pattern, args.new_name)
+            result = _preview_modify_roles(patterns, args.pattern, args.new_name, args.note)
         
         conn.close()
         return result
@@ -275,7 +276,7 @@ def _preview_modify_groups(groups: list[dict], new_name: str) -> Result[Cmd, str
     return ok({"name": "modify_preview", "data": preview_data})
 
 
-def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_name: str = None) -> Result[Cmd, str]:
+def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_name: str = None, new_note: str = None) -> Result[Cmd, str]:
     """Generate preview of role pattern modifications."""
     preview_data = []
     for pattern in patterns:
@@ -294,6 +295,10 @@ def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_nam
         if new_name is not None:
             record["current_name"] = pattern.get("name")
             record["new_name"] = new_name
+
+        if new_note is not None:
+            record["current_note"] = pattern.get("note", "")
+            record["new_note"] = new_note
 
         preview_data.append(record)
     return ok({"name": "modify_preview", "data": preview_data})
@@ -359,7 +364,7 @@ def _execute_modify_groups(conn: sqlite3.Connection, groups: list[dict], new_nam
     return ok({"name": "modify_result", "data": results})
 
 
-def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pattern: str = None, new_name: str = None) -> Result[Cmd, str]:
+def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pattern: str = None, new_name: str = None, new_note: str = None) -> Result[Cmd, str]:
     """Execute role pattern modifications."""
     results = []
 
@@ -368,7 +373,7 @@ def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pa
         ticker = pattern.get("ticker", "")
         cik = pattern.get("cik", "")
 
-        result = db.queries.role_patterns.update(conn, pattern_id, new_pattern, new_name)
+        result = db.queries.role_patterns.update(conn, pattern_id, new_pattern, new_name, new_note)
         if is_not_ok(result):
             return result
 
@@ -387,6 +392,10 @@ def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pa
         if new_name is not None:
             record["old_name"] = pattern.get("name")
             record["new_name"] = new_name
+
+        if new_note is not None:
+            record["old_note"] = pattern.get("note", "")
+            record["new_note"] = new_note
 
         results.append(record)
 
