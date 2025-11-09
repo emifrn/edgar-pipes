@@ -45,7 +45,6 @@ def add_arguments(subparsers):
     # Filtering
     group_filters = parser_roles.add_argument_group('filtering')
     group_filters.add_argument("-p", "--pattern", metavar="X", help="role names regex pattern")
-    group_filters.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
 
     # Output control
     group_output = parser_roles.add_argument_group('output control')
@@ -69,7 +68,6 @@ def add_arguments(subparsers):
     group_filters = parser_concepts.add_argument_group('filtering')
     group_filters.add_argument("-p", "--pattern", metavar="X", help="regex pattern for concept tags")
     group_filters.add_argument("-n", "--name", metavar="X", help="semantic concept name filter (e.g., 'cash', 'inventory')")
-    group_filters.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive pattern matching")
     group_filters.add_argument("-l", "--label", action="store_true", help="search concept labels instead of tags")
 
     # Output control
@@ -431,8 +429,7 @@ def select_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     # Step 3: Apply explicit pattern filter (if requested)
     if args.pattern:
         try:
-            flags = re.IGNORECASE if args.ignore_case else 0
-            regex = re.compile(args.pattern, flags)
+            regex = re.compile(args.pattern)
             roles = [role for role in roles if regex.search(role['role_name'])]
         except re.error as e:
             return err(f"cli.select.select_roles: invalid regex pattern '{args.pattern}': {e}")
@@ -624,12 +621,11 @@ def _filter_concepts_by_group(conn: sqlite3.Connection, concepts: list[dict], ar
     return ok(filtered_concepts)
 
 
-def _filter_concepts_by_pattern(concepts: list[dict], pattern: str, use_label: bool, ignore_case: bool = False) -> Result[list[dict], str]:
+def _filter_concepts_by_pattern(concepts: list[dict], pattern: str, use_label: bool) -> Result[list[dict], str]:
     """Filter concepts using regex pattern on tag field."""
 
     try:
-        flags = re.IGNORECASE if ignore_case else 0
-        regex = re.compile(pattern, flags)
+        regex = re.compile(pattern)
     except re.error as e:
         return err(f"_filter_concepts_by_pattern: invalid regex pattern '{pattern}': {e}")
 
@@ -685,7 +681,7 @@ def select_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     
     # Step 3: Apply additional regex pattern filtering (if requested)
     if args.pattern:
-        result = _filter_concepts_by_pattern(concepts, args.pattern, args.label, args.ignore_case)
+        result = _filter_concepts_by_pattern(concepts, args.pattern, args.label)
         if is_not_ok(result):
             return result
         concepts = result[1]

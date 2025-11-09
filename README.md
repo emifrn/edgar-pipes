@@ -214,8 +214,8 @@ ep new group Balance
 
 # 4. Find role pattern by filtering role names
 # The number of roles in any filing is typically in the hundreds
-# Start with a broad pattern to see what matches (e.g., '.*balance.*')
-ep select filings -t <TICKER> | ep select roles -p '.*balance.*' --cols role_name --uniq --ignore-case
+# Start with a broad pattern to see what matches (use (?i) for case-insensitive matching)
+ep select filings -t <TICKER> | ep select roles -p '(?i).*balance.*' --cols role_name --uniq
 
 # 5. Once you've identified the right pattern, create a named role-pattern
 # This pattern will match role URIs across all filings and can be shared across related groups
@@ -237,7 +237,7 @@ ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts 
 # concepts) using option -m. Empty result means full coverage; any rows indicate
 # the pattern needs refinement or the concept doesn't appear consistently across
 # all filings.
-ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -p 'Cash' -i -m
+ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -p '(?i)Cash' -m
 
 # 9. Create concept patterns for desired financial metrics. The option -u
 # associates a "user-id" to a concept for easier reference and bulk operations.
