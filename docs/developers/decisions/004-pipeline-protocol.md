@@ -1,4 +1,4 @@
-# ADR 003: JSON Pipeline Protocol
+# ADR 004: JSON Pipeline Protocol
 
 ## Context
 

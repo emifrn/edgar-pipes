@@ -1,4 +1,4 @@
-# ADR 002: Pattern based fact extraction
+# ADR 003: Pattern based fact extraction
 
 ## Context
 

@@ -1,4 +1,4 @@
-# ADR 001: Result types for error handling
+# ADR 002: Result types for error handling
 
 The edgar-pipes database operations and external API calls can fail. Python's
 default exception-based error handling makes it easy to miss error cases and

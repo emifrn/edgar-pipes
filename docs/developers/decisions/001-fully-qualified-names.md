@@ -1,4 +1,4 @@
-# ADR 004: Fully Qualified Function Names
+# ADR 001: Fully Qualified Function Names
 
 Edgar-pipes adopts a fully qualified naming policy where functions are always
 called through their complete module path. This allows function names to be
