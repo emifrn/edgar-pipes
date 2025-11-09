@@ -45,6 +45,7 @@ def add_arguments(subparsers):
     parser_concept.add_argument("-n", "--name", help="new concept name")
     parser_concept.add_argument("--pattern", help="new regex pattern")
     parser_concept.add_argument("--new-uid", type=int, dest="new_uid", help="new user-assigned ID")
+    parser_concept.add_argument("--note", help="new or updated note describing the pattern rationale")
     parser_concept.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_concept.set_defaults(func=run)
 
@@ -185,8 +186,8 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Modify concept names, patterns, and/or user_id with preview/execute workflow."""
 
     # Validate at least one modification field provided
-    if not args.name and not args.pattern and args.new_uid is None:
-        return err("modify concept: must provide --name, --pattern, --new-uid, or combination")
+    if not args.name and not args.pattern and args.new_uid is None and not args.note:
+        return err("modify concept: must provide --name, --pattern, --new-uid, --note, or combination")
     
     # Validate regex if provided
     if args.pattern:
@@ -243,9 +244,9 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
         # Preview or execute
         if args.yes:
-            result = _execute_modify_concepts(conn, patterns, args.name, args.pattern, args.new_uid)
+            result = _execute_modify_concepts(conn, patterns, args.name, args.pattern, args.new_uid, args.note)
         else:
-            result = _preview_modify_concepts(patterns, args.name, args.pattern, args.new_uid)
+            result = _preview_modify_concepts(patterns, args.name, args.pattern, args.new_uid, args.note)
         
         conn.close()
         return result
@@ -298,7 +299,7 @@ def _preview_modify_roles(patterns: list[dict], new_pattern: str = None, new_nam
     return ok({"name": "modify_preview", "data": preview_data})
 
 
-def _preview_modify_concepts(patterns: list[dict], new_name: str = None, new_pattern: str = None, new_user_id: int = None) -> Result[Cmd, str]:
+def _preview_modify_concepts(patterns: list[dict], new_name: str = None, new_pattern: str = None, new_user_id: int = None, new_note: str = None) -> Result[Cmd, str]:
     """Generate preview of concept pattern modifications."""
     preview_data = []
     for pattern in patterns:
@@ -321,6 +322,10 @@ def _preview_modify_concepts(patterns: list[dict], new_name: str = None, new_pat
         if new_user_id is not None:
             record["current_uid"] = pattern.get("uid")
             record["new_uid"] = new_user_id
+
+        if new_note is not None:
+            record["current_note"] = pattern.get("note", "")
+            record["new_note"] = new_note
 
         preview_data.append(record)
 
@@ -389,7 +394,7 @@ def _execute_modify_roles(conn: sqlite3.Connection, patterns: list[dict], new_pa
 
 
 def _execute_modify_concepts(conn: sqlite3.Connection, patterns: list[dict],
-                             new_name: str = None, new_pattern: str = None, new_user_id: int = None) -> Result[Cmd, str]:
+                             new_name: str = None, new_pattern: str = None, new_user_id: int = None, new_note: str = None) -> Result[Cmd, str]:
     """Execute concept pattern modifications."""
     results = []
 
@@ -398,7 +403,7 @@ def _execute_modify_concepts(conn: sqlite3.Connection, patterns: list[dict],
         ticker = pattern.get("ticker", "")
         cik = pattern.get("cik", "")
 
-        result = db.queries.concept_patterns.update(conn, pattern_id, new_pattern, new_name, new_user_id)
+        result = db.queries.concept_patterns.update(conn, pattern_id, new_pattern, new_name, new_user_id, new_note)
         if is_not_ok(result):
             return result
 
@@ -421,6 +426,10 @@ def _execute_modify_concepts(conn: sqlite3.Connection, patterns: list[dict],
         if new_user_id is not None:
             record["old_uid"] = pattern.get("uid")
             record["new_uid"] = new_user_id
+
+        if new_note is not None:
+            record["old_note"] = pattern.get("note", "")
+            record["new_note"] = new_note
 
         results.append(record)
 

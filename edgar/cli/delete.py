@@ -263,6 +263,7 @@ def _preview_patterns(patterns: list[dict]) -> list[dict]:
                 "uid": pattern.get("uid"),
                 "name": pattern["name"],
                 "pattern": pattern["pattern"],
+                "note": pattern.get("note", ""),
                 "status": "dry-run",
             })
     
@@ -300,6 +301,7 @@ def _delete_patterns(conn: sqlite3.Connection, patterns: list[dict]) -> Result[l
                 "uid": pattern.get("uid"),
                 "name": pattern["name"],
                 "pattern": pattern["pattern"],
+                "note": pattern.get("note", ""),
                 "status": "deleted"
             })
 

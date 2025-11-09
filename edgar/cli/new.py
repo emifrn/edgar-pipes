@@ -29,6 +29,7 @@ def add_arguments(subparsers):
     parser_concept.add_argument("-n", "--name", metavar="X", required=True, help="concept name")
     parser_concept.add_argument("-p", "--pattern", metavar="X", required=True, help="regex pattern")
     parser_concept.add_argument("-u", "--uid", type=int, help="optional user-assigned ID")
+    parser_concept.add_argument("--note", metavar="X", help="optional note describing the pattern rationale")
     parser_concept.set_defaults(func=run)
 
     # new role
@@ -112,9 +113,9 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         cik = entity["cik"]
         company_name = entity["name"]
 
-        # Insert concept pattern with optional uid
+        # Insert concept pattern with optional uid and note
         result = db.queries.concept_patterns.insert(
-            conn, cik, args.name, args.pattern, args.uid
+            conn, cik, args.name, args.pattern, args.uid, args.note
         )
         if is_not_ok(result):
             conn.close()
@@ -128,6 +129,8 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         if args.uid is not None:
             print(f"User ID: {args.uid}", file=sys.stderr)
         print(f"Pattern: {args.pattern}", file=sys.stderr)
+        if args.note:
+            print(f"Note: {args.note}", file=sys.stderr)
 
         conn.close()
         return ok(None)

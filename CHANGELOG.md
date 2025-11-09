@@ -19,6 +19,7 @@ Initial release.
 - Journal system for reproducible workflows
 - Multiple output formats (table, CSV, JSON)
 - XDG-compliant configuration system
+- Optional `--note` field for concept patterns to document pattern rationale
 
 ### Known Limitations
 - US companies only (Form 10-Q/10-K)

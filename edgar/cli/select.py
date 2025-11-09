@@ -789,7 +789,7 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
 
     # Consistent columns (only show user-visible IDs)
     # Note: pid is included in data for delete command but hidden from default display
-    default_cols = ['uid', 'type', 'ticker', 'cik', 'group_name', 'name', 'pattern']
+    default_cols = ['uid', 'type', 'ticker', 'cik', 'group_name', 'name', 'pattern', 'note']
 
     result = cli.shared.process_cols(patterns, args.cols, default_cols)
     if is_not_ok(result):
@@ -813,6 +813,7 @@ def format_pattern_record(pattern: dict, pattern_type: str, **kwargs) -> dict:
         "group_name": kwargs.get("group_name", ""),
         "name": kwargs.get("name", ""),
         "pattern": pattern["pattern"],
+        "note": pattern.get("note", ""),
     }
 
 

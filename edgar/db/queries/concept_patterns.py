@@ -24,6 +24,7 @@ def get_with_entity(conn: sqlite3.Connection, cik: Optional[str], uid: str) -> R
                 cp.pattern,
                 cp.uid,
                 cp.name,
+                cp.note,
                 e.ticker,
                 e.name as company_name
         FROM concept_patterns cp
@@ -48,7 +49,7 @@ def get_by_uid(conn: sqlite3.Connection, cik: str, uid: str) -> Result[Optional[
     """
     Get concept pattern by CIK and user ID.
     """
-    query = "SELECT pid, cik, pattern, uid, name FROM concept_patterns WHERE cik = ? AND uid = ?"
+    query = "SELECT pid, cik, pattern, uid, name, note FROM concept_patterns WHERE cik = ? AND uid = ?"
     result = db.store.select(conn, query, (cik, uid))
     if is_ok(result):
         patterns = result[1]
@@ -61,7 +62,7 @@ def get_by_name(conn: sqlite3.Connection, cik: str, name: str) -> Result[Optiona
     """
     Get concept pattern by CIK and name.
     """
-    query = "SELECT pid, cik, pattern, uid, name FROM concept_patterns WHERE cik = ? AND name = ?"
+    query = "SELECT pid, cik, pattern, uid, name, note FROM concept_patterns WHERE cik = ? AND name = ?"
     result = db.store.select(conn, query, (cik, name))
     if is_ok(result):
         patterns = result[1]
@@ -70,7 +71,7 @@ def get_by_name(conn: sqlite3.Connection, cik: str, name: str) -> Result[Optiona
         return result
 
 
-def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str, uid: Optional[int] = None) -> Result[int, str]:
+def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str, uid: Optional[int] = None, note: Optional[str] = None) -> Result[int, str]:
     """
     Insert concept pattern with UID (without OR IGNORE).
 
@@ -78,8 +79,8 @@ def insert(conn: sqlite3.Connection, cik: str, name: str, pattern: str, uid: Opt
     Returns pattern ID.
     """
     try:
-        query = "INSERT INTO concept_patterns (cik, name, pattern, uid) VALUES (?, ?, ?, ?)"
-        cursor = conn.execute(query, (cik, name, pattern, uid))
+        query = "INSERT INTO concept_patterns (cik, name, pattern, uid, note) VALUES (?, ?, ?, ?, ?)"
+        cursor = conn.execute(query, (cik, name, pattern, uid, note))
         pid = cursor.lastrowid
         conn.commit()
         cursor.close()
@@ -101,7 +102,8 @@ def select_by_group(conn: sqlite3.Connection, gid: int, cik: Optional[str] = Non
                 cp.cik,
                 cp.pattern,
                 cp.uid,
-                cp.name
+                cp.name,
+                cp.note
         FROM concept_patterns cp
         JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
         WHERE gcp.gid = ?
@@ -134,6 +136,7 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
                cp.name,
                cp.pattern,
                cp.uid,
+               cp.note,
                COALESCE(GROUP_CONCAT(DISTINCT g.name), '') as group_name
         FROM concept_patterns cp
         LEFT JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
@@ -156,12 +159,12 @@ def select(conn: sqlite3.Connection, group_name: Optional[str] = None, cik: Opti
     else:
         query = base_query
 
-    query += " GROUP BY cp.pid, cp.cik, cp.name, cp.pattern, cp.uid"
+    query += " GROUP BY cp.pid, cp.cik, cp.name, cp.pattern, cp.uid, cp.note"
 
     return db.store.select(conn, query, tuple(params))
 
 
-def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, name: Optional[str] = None, uid: Optional[int] = None) -> Result[int, str]:
+def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, name: Optional[str] = None, uid: Optional[int] = None, note: Optional[str] = None) -> Result[int, str]:
     """
     Update concept pattern.
 
@@ -182,6 +185,10 @@ def update(conn: sqlite3.Connection, pid: int, pattern: Optional[str] = None, na
     if uid is not None:
         updates.append("uid = ?")
         params.append(uid)
+
+    if note is not None:
+        updates.append("note = ?")
+        params.append(note)
 
     if not updates:
         return ok(0)  # Nothing to update

@@ -48,3 +48,18 @@ db/
     ├── groups.py     - Pattern collections
     └── *_patterns.py - Regex patterns for extraction
 ```
+
+## Schema notes
+
+### concept_patterns table
+
+The `concept_patterns` table stores regex patterns for matching XBRL concept tags:
+
+- `pid` - Pattern ID (primary key)
+- `cik` - Company identifier (foreign key to entities)
+- `name` - Semantic label for the pattern
+- `pattern` - Regex pattern text
+- `uid` - Optional user-assigned ID for bulk operations
+- `note` - Optional documentation field explaining the pattern rationale
+
+The `note` field enables users to document why a pattern was created, which variations it captures, or other rationale. This is especially useful for complex patterns that match multiple tag variations.

@@ -20,9 +20,9 @@ Each command module follows the same structure:
 - `select.py`: Query database for entities, filings, groups, roles, concepts, and patterns
 
 **Data definition:**
-- `new.py`: Create groups, roles, and concepts with patterns
+- `new.py`: Create groups, roles, and concepts with patterns (supports `--note` for concept patterns)
 - `add.py`: Link existing entities (roles/concepts) to groups
-- `modify.py`: Update patterns and metadata
+- `modify.py`: Update patterns and metadata (supports `--note` for concept patterns)
 - `delete.py`: Remove groups, roles, concepts, and their relationships
 
 **Data extraction:**
