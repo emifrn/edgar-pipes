@@ -253,7 +253,7 @@ def select_groups(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
             return err(f"cli.select.select_groups: invalid regex pattern '{args.pattern}': {e}")
     
     # Apply column processing
-    default_cols = ['gid', 'group_name']
+    default_cols = ['group_name']
     result = cli.shared.process_cols(groups, args.cols, default_cols)
     if is_not_ok(result):
         return result

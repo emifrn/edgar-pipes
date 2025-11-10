@@ -206,13 +206,16 @@ def process_cols(data: list[dict],
         except Exception as e:
             return err(f"shared.process_cols: sorting failed: {e}")
 
-    # Filter data to selected columns, but always preserve 'pid' for delete command
+    # Filter data to selected columns, but always preserve 'pid' and 'gid' for pipeline compatibility
     filtered_data = []
     for row in processed_data:
         filtered_row = {col: row[col] for col in valid_cols}
         # Preserve pid if it exists (needed for delete command)
         if 'pid' in row and 'pid' not in filtered_row:
             filtered_row['pid'] = row['pid']
+        # Preserve gid if it exists (needed for modify group pipeline)
+        if 'gid' in row and 'gid' not in filtered_row:
+            filtered_row['gid'] = row['gid']
         filtered_data.append(filtered_row)
 
     return ok((filtered_data, valid_cols))

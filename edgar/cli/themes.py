@@ -309,18 +309,22 @@ def themed_table(data: list[dict], headers: list[str] = None, theme_name: str = 
     """Generate themed table from data using Rich."""
     if not data:
         return ""
-    
+
     if not HAS_RICH:
         # Fallback to tabulate if Rich not available
         from tabulate import tabulate
         if headers is None:
             headers = list(data[0].keys())
+            # Filter out internal IDs (gid, pid) used only for pipeline compatibility
+            headers = [h for h in headers if h not in ('gid', 'pid')]
         table_data = [[row.get(h, "") for h in headers] for row in data]
         return tabulate(table_data, headers=headers, tablefmt="simple")
-    
+
     # Use provided headers or derive from first row
     if headers is None:
         headers = list(data[0].keys())
+        # Filter out internal IDs (gid, pid) used only for pipeline compatibility
+        headers = [h for h in headers if h not in ('gid', 'pid')]
     
     theme = get_theme(theme_name)
     

@@ -24,8 +24,7 @@ def add_arguments(subparsers):
     
     # modify group
     parser_group = modify_subparsers.add_parser("group", help="modify group name or remove patterns from group")
-    parser_group.add_argument("group_name", help="name of group to modify")
-    parser_group.add_argument("--gid", type=int, help="group ID (for pipeline mode)")
+    parser_group.add_argument("group_name", nargs="?", help="name of group to modify (optional for pipeline mode)")
 
     # Mode selection: rename or remove
     mode_group = parser_group.add_mutually_exclusive_group(required=True)
@@ -96,9 +95,17 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
         else:
             # Rename mode: group name (existing behavior)
             # Collect groups to modify
-            if args.gid:
-                # Standalone mode: fetch group by ID
-                result = db.queries.groups.get(conn, args.gid)
+            if args.group_name:
+                # Standalone mode: lookup group by name
+                result = db.queries.groups.get_id(conn, args.group_name)
+                if is_not_ok(result):
+                    conn.close()
+                    return result
+                group_id = result[1]
+                if group_id is None:
+                    conn.close()
+                    return err(f"modify group: group '{args.group_name}' not found")
+                result = db.queries.groups.get(conn, group_id)
                 if is_not_ok(result):
                     conn.close()
                     return result
@@ -111,7 +118,7 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
                 groups = cmd["data"]
             else:
                 conn.close()
-                return err("modify group: no input. Use --gid or pipe group data")
+                return err("modify group: no input. Use group_name or pipe group data")
 
             # Preview or execute
             old_name, new_name = args.rename
