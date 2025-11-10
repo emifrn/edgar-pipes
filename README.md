@@ -407,7 +407,7 @@ examples, refer to each command help section, e.g. "ep delete -h".
 | `report`  | Generate financial reports |
 | `calc`    | Perform calculations on data |
 | `stats`   | Analyze concept frequency |
-| `modify`  | Update existing patterns |
+| `modify`  | Update patterns and manage group membership |
 | `delete`  | Remove data from database |
 | `config`  | Manage configuration settings |
 | `journal` | Track command history |
