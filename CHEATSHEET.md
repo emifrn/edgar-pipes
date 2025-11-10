@@ -310,7 +310,7 @@ ep modify concept -u 1 -t TICKER --pattern '^NewPattern$'
 ep modify role -n role_name -t TICKER --pattern 'NewRolePattern'
 
 # Rename group (preview only)
-ep modify group --gid 5 -n NewGroupName
+ep modify group GroupName --rename OldName NewName
 ```
 
 ### Execute Changes
@@ -319,6 +319,23 @@ ep modify group --gid 5 -n NewGroupName
 # Execute with -y flag
 ep modify concept -u 1 -t TICKER --pattern '^NewPattern$' -y
 ep modify role -n role_name -t TICKER --new-name new_role_name -y
+ep modify group GroupName --rename OldName NewName -y
+```
+
+### Remove Patterns from Group
+
+```bash
+# Remove concept patterns (preview only)
+ep modify group GroupName --remove-concept -t TICKER -u 8
+ep modify group GroupName --remove-concept -t TICKER -n "Concept Name"
+
+# Remove role patterns (preview only)
+ep modify group GroupName --remove-role -t TICKER -n role_name
+
+# Execute with -y flag
+ep modify group GroupName --remove-concept -t TICKER -u 8 -y
+ep modify group GroupName --remove-concept -t TICKER -n "Concept Name" -y
+ep modify group GroupName --remove-role -t TICKER -n role_name -y
 ```
 
 ---
