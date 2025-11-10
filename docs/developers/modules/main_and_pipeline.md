@@ -51,7 +51,7 @@ Determines output format from flags or automatic detection:
 Commands are journaled with full pipeline history:
 - Entry written on command completion (success or error)
 - Meta commands (config, history, journal) are not journaled
-- Journal entries include: index, timestamp, status, command, optional error
+- Journal entries include: index, status, command, optional error
 - Status bar shows current journal and recording state
 
 ### Error handling

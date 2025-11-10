@@ -11,7 +11,6 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
-from datetime import datetime, timezone
 
 # Local modules
 from edgar import cli
@@ -93,7 +92,7 @@ def get_next_index(journal_path: Path) -> int:
 
 def write_entry(pipeline: list[str], status: str, error_msg: Optional[str] = None) -> None:
     """
-    Write a pipeline command to the journal with timestamp and status.
+    Write a pipeline command to the journal with status.
 
     Args:
         pipeline: List of command strings that make up the pipeline
@@ -107,15 +106,10 @@ def write_entry(pipeline: list[str], status: str, error_msg: Optional[str] = Non
         journal_path = get_journal_path()
         next_index = get_next_index(journal_path)
 
-        # Create JSON entry
-        now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
         pipeline_str = " | ".join(pipeline)
 
         entry = {
             "index": next_index,
-            "timestamp": timestamp,
             "status": status,
             "command": pipeline_str
         }
@@ -381,10 +375,8 @@ def journal_migrate(journal_name: Optional[str] = None) -> Result[None, str]:
                         command = command[end_bracket + 1:].strip()
 
                     # Create new JSON entry
-                    timestamp = f"{date}T{time}Z"
                     entry = {
                         "index": index,
-                        "timestamp": timestamp,
                         "status": status,
                         "command": command
                     }
@@ -829,18 +821,6 @@ def display_entries(entries: list[dict]) -> None:
     # Convert to table format
     table_data = []
     for entry in entries:
-        # Parse ISO 8601 timestamp (2025-10-12T04:07:48Z)
-        timestamp = entry.get("timestamp", "")
-        if 'T' in timestamp:
-            parts = timestamp.split('T')
-            date = parts[0]
-            time = parts[1].rstrip('Z') if len(parts) > 1 else ""
-        else:
-            # Fallback for space-separated format
-            timestamp_parts = timestamp.split()
-            date = timestamp_parts[0] if len(timestamp_parts) > 0 else ""
-            time = timestamp_parts[1] if len(timestamp_parts) > 1 else ""
-
         # Build command field with optional error on second line
         command_text = entry["command"]
         if entry.get("error_msg"):
@@ -848,8 +828,6 @@ def display_entries(entries: list[dict]) -> None:
 
         table_data.append({
             "Index": entry["index"],
-            "Date": date,
-            "Time": time,
             "S": "✓" if entry["status"] == "OK" else "✗",
             "Command": command_text
         })
