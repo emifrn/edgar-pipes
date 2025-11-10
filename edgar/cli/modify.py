@@ -23,15 +23,27 @@ def add_arguments(subparsers):
     modify_subparsers = parser_modify.add_subparsers(dest='modify_cmd', help='modify commands')
     
     # modify group
-    parser_group = modify_subparsers.add_parser("group", help="modify group name")
-    parser_group.add_argument("--gid", type=int, help="group ID (for standalone mode)")
-    parser_group.add_argument("-n", "--name", required=True, help="new group name")
+    parser_group = modify_subparsers.add_parser("group", help="modify group name or remove patterns from group")
+    parser_group.add_argument("group_name", help="name of group to modify")
+    parser_group.add_argument("--gid", type=int, help="group ID (for pipeline mode)")
+
+    # Mode selection: rename or remove
+    mode_group = parser_group.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"), help="rename group from OLD to NEW")
+    mode_group.add_argument("--remove-concept", action="store_true", help="remove concept patterns from group")
+    mode_group.add_argument("--remove-role", action="store_true", help="remove role patterns from group")
+
+    # Pattern selection (for remove modes)
+    parser_group.add_argument("-u", "--uid", nargs="+", type=int, help="concept pattern user IDs to remove")
+    parser_group.add_argument("-n", "--names", nargs="+", help="pattern names to remove")
+    parser_group.add_argument("-t", "--ticker", help="ticker (required when using -u or -n)")
+
     parser_group.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_group.set_defaults(func=run)
     
     # modify role
     parser_role = modify_subparsers.add_parser("role", help="modify role pattern regex")
-    parser_role.add_argument("--name", "-n", help="pattern name to select pattern (for standalone mode)")
+    parser_role.add_argument("-n", "--name", help="pattern name to select pattern (for standalone mode)")
     parser_role.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
     parser_role.add_argument("--pattern", help="new regex pattern")
     parser_role.add_argument("--new-name", dest="new_name", help="new pattern name")
@@ -41,7 +53,7 @@ def add_arguments(subparsers):
 
     # modify concept
     parser_concept = modify_subparsers.add_parser("concept", help="modify concept name and/or pattern")
-    parser_concept.add_argument("--uid", "-u", type=int, help="user ID to select pattern (for standalone mode)")
+    parser_concept.add_argument("-u", "--uid", type=int, help="user ID to select pattern (for standalone mode)")
     parser_concept.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
     parser_concept.add_argument("-n", "--name", help="new concept name")
     parser_concept.add_argument("--pattern", help="new regex pattern")
@@ -65,47 +77,214 @@ def run(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
 
 def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
-    """Modify group names with preview/execute workflow."""
-    
+    """Modify group names or remove patterns with preview/execute workflow."""
+
     try:
         conn = sqlite3.connect(args.db)
-        
+
         result = db.store.init(conn)
         if is_not_ok(result):
             conn.close()
             return result
-        
-        # Collect groups to modify
-        if args.gid:
-            # Standalone mode: fetch group by ID
-            result = db.queries.groups.get(conn, args.gid)
-            if is_not_ok(result):
-                conn.close()
-                return result
-            groups = [result[1]]
-        elif cmd["data"]:
-            # Pipeline mode: validate data type
-            if cmd["name"] != "groups":
-                conn.close()
-                return err(f"modify group: expected group data, got '{cmd['name']}'")
-            groups = cmd["data"]
+
+        # Determine if rename or remove operation
+        is_remove = args.remove_concept or args.remove_role
+
+        if is_remove:
+            # Remove mode: patterns from group
+            return run_modify_group_remove(conn, args)
         else:
+            # Rename mode: group name (existing behavior)
+            # Collect groups to modify
+            if args.gid:
+                # Standalone mode: fetch group by ID
+                result = db.queries.groups.get(conn, args.gid)
+                if is_not_ok(result):
+                    conn.close()
+                    return result
+                groups = [result[1]]
+            elif cmd["data"]:
+                # Pipeline mode: validate data type
+                if cmd["name"] != "groups":
+                    conn.close()
+                    return err(f"modify group: expected group data, got '{cmd['name']}'")
+                groups = cmd["data"]
+            else:
+                conn.close()
+                return err("modify group: no input. Use --gid or pipe group data")
+
+            # Preview or execute
+            old_name, new_name = args.rename
+            if args.yes:
+                result = _execute_modify_groups(conn, groups, new_name)
+            else:
+                result = _preview_modify_groups(groups, new_name)
+
             conn.close()
-            return err("modify group: no input. Use --gid or pipe group data")
-        
-        # Preview or execute
-        if args.yes:
-            result = _execute_modify_groups(conn, groups, args.name)
-        else:
-            result = _preview_modify_groups(groups, args.name)
-        
-        conn.close()
-        return result
-        
+            return result
+
     except Exception as e:
         if 'conn' in locals():
             conn.close()
         return err(f"cli.modify.run_modify_group: {e}")
+
+
+def run_modify_group_remove(conn: sqlite3.Connection, args) -> Result[Cmd | None, str]:
+    """Remove patterns from a group with preview/execute workflow."""
+
+    try:
+        # Get group by name
+        result = db.queries.groups.get_id(conn, args.group_name)
+        if is_not_ok(result):
+            conn.close()
+            return result
+
+        group_id = result[1]
+        if group_id is None:
+            conn.close()
+            return err(f"modify group: group '{args.group_name}' not found")
+
+        # Determine pattern type
+        if args.remove_concept:
+            return _remove_concepts_from_group(conn, args, group_id)
+        else:  # args.remove_role
+            return _remove_roles_from_group(conn, args, group_id)
+
+    except Exception as e:
+        if 'conn' in locals():
+            conn.close()
+        return err(f"cli.modify.run_modify_group_remove: {e}")
+
+
+def _remove_concepts_from_group(conn: sqlite3.Connection, args, group_id: int) -> Result[Cmd | None, str]:
+    """Remove concept patterns from group."""
+
+    try:
+        # Validate ticker is provided if using uid/names
+        if (args.uid or args.names) and not args.ticker:
+            conn.close()
+            return err("modify group --remove-concept: --ticker is required when using -u or -n")
+
+        # Get patterns to remove
+        patterns = []
+
+        if args.uid:
+            # Fetch by uid
+            result = db.queries.entities.get(conn, ticker=args.ticker)
+            if is_not_ok(result):
+                conn.close()
+                return result
+            entity = result[1]
+            if not entity:
+                conn.close()
+                return err(f"modify group: ticker '{args.ticker}' not found")
+            cik = entity["cik"]
+
+            for uid in args.uid:
+                result = db.queries.concept_patterns.get_by_uid(conn, cik, str(uid))
+                if is_not_ok(result):
+                    conn.close()
+                    return result
+                pattern = result[1]
+                if not pattern:
+                    conn.close()
+                    return err(f"modify group: concept pattern with uid={uid} for {args.ticker} not found")
+                patterns.append(pattern)
+
+        elif args.names:
+            # Fetch by name
+            result = db.queries.entities.get(conn, ticker=args.ticker)
+            if is_not_ok(result):
+                conn.close()
+                return result
+            entity = result[1]
+            if not entity:
+                conn.close()
+                return err(f"modify group: ticker '{args.ticker}' not found")
+            cik = entity["cik"]
+
+            for name in args.names:
+                result = db.queries.concept_patterns.get_by_name(conn, cik, name)
+                if is_not_ok(result):
+                    conn.close()
+                    return result
+                pattern = result[1]
+                if not pattern:
+                    conn.close()
+                    return err(f"modify group: concept pattern '{name}' for {args.ticker} not found")
+                patterns.append(pattern)
+
+        else:
+            conn.close()
+            return err("modify group --remove-concept: must provide -u (uid) or -n (names)")
+
+        # Preview or execute
+        if args.yes:
+            result = _execute_remove_concepts(conn, group_id, args.group_name, patterns)
+        else:
+            result = _preview_remove_concepts(group_id, args.group_name, patterns)
+
+        conn.close()
+        return result
+
+    except Exception as e:
+        if 'conn' in locals():
+            conn.close()
+        return err(f"cli.modify._remove_concepts_from_group: {e}")
+
+
+def _remove_roles_from_group(conn: sqlite3.Connection, args, group_id: int) -> Result[Cmd | None, str]:
+    """Remove role patterns from group."""
+
+    try:
+        # Validate ticker is provided if using names
+        if args.names and not args.ticker:
+            conn.close()
+            return err("modify group --remove-role: --ticker is required when using -n")
+
+        # Get patterns to remove
+        patterns = []
+
+        if args.names:
+            # Fetch by name
+            result = db.queries.entities.get(conn, ticker=args.ticker)
+            if is_not_ok(result):
+                conn.close()
+                return result
+            entity = result[1]
+            if not entity:
+                conn.close()
+                return err(f"modify group: ticker '{args.ticker}' not found")
+            cik = entity["cik"]
+
+            for name in args.names:
+                result = db.queries.role_patterns.get(conn, cik, name)
+                if is_not_ok(result):
+                    conn.close()
+                    return result
+                pattern = result[1]
+                if not pattern:
+                    conn.close()
+                    return err(f"modify group: role pattern '{name}' for {args.ticker} not found")
+                patterns.append(pattern)
+
+        else:
+            conn.close()
+            return err("modify group --remove-role: must provide -n (names)")
+
+        # Preview or execute
+        if args.yes:
+            result = _execute_remove_roles(conn, group_id, args.group_name, patterns)
+        else:
+            result = _preview_remove_roles(group_id, args.group_name, patterns)
+
+        conn.close()
+        return result
+
+    except Exception as e:
+        if 'conn' in locals():
+            conn.close()
+        return err(f"cli.modify._remove_roles_from_group: {e}")
 
 
 def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
@@ -256,6 +435,92 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
         if 'conn' in locals():
             conn.close()
         return err(f"cli.modify.run_modify_concept: {e}")
+
+
+# =============================================================================
+# REMOVE PATTERN HELPERS (Preview & Execute)
+# =============================================================================
+
+def _preview_remove_concepts(group_id: int, group_name: str, patterns: list[dict]) -> Result[Cmd, str]:
+    """Generate preview of concept pattern removal from group."""
+    preview_data = []
+    for pattern in patterns:
+        preview_data.append({
+            "operation": "remove_concept_from_group",
+            "uid": pattern.get("uid"),
+            "name": pattern.get("name"),
+            "group": group_name,
+            "status": "preview"
+        })
+    return ok({"name": "modify_preview", "data": preview_data})
+
+
+def _execute_remove_concepts(conn: sqlite3.Connection, group_id: int, group_name: str, patterns: list[dict]) -> Result[Cmd, str]:
+    """Execute removal of concept patterns from group."""
+    results = []
+
+    try:
+        cursor = conn.cursor()
+        for pattern in patterns:
+            pid = pattern["pid"]
+
+            # Delete from group_concept_patterns
+            cursor.execute("DELETE FROM group_concept_patterns WHERE gid = ? AND pid = ?", (group_id, pid))
+
+            results.append({
+                "operation": "remove_concept_from_group",
+                "uid": pattern.get("uid"),
+                "name": pattern.get("name"),
+                "group": group_name,
+                "status": "removed"
+            })
+
+        conn.commit()
+        return ok({"name": "modify_result", "data": results})
+
+    except Exception as e:
+        conn.rollback()
+        return err(f"_execute_remove_concepts: failed to remove concepts: {e}")
+
+
+def _preview_remove_roles(group_id: int, group_name: str, patterns: list[dict]) -> Result[Cmd, str]:
+    """Generate preview of role pattern removal from group."""
+    preview_data = []
+    for pattern in patterns:
+        preview_data.append({
+            "operation": "remove_role_from_group",
+            "name": pattern.get("name"),
+            "group": group_name,
+            "status": "preview"
+        })
+    return ok({"name": "modify_preview", "data": preview_data})
+
+
+def _execute_remove_roles(conn: sqlite3.Connection, group_id: int, group_name: str, patterns: list[dict]) -> Result[Cmd, str]:
+    """Execute removal of role patterns from group."""
+    results = []
+
+    try:
+        cursor = conn.cursor()
+        for pattern in patterns:
+            pid = pattern["pid"]
+
+            # Delete from group_role_patterns
+            cursor.execute("DELETE FROM group_role_patterns WHERE gid = ? AND pid = ?", (group_id, pid))
+
+            results.append({
+                "operation": "remove_role_from_group",
+                "name": pattern.get("name"),
+                "group": group_name,
+                "status": "removed"
+            })
+
+        conn.commit()
+        return ok({"name": "modify_result", "data": results})
+
+    except Exception as e:
+        conn.rollback()
+        return err(f"_execute_remove_roles: failed to remove roles: {e}")
 
 
 # =============================================================================
