@@ -181,33 +181,6 @@ def select_entities(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     return ok({"name": "entities", "data": entities})
 
 
-def _parse_date_filters(date_args: list[str] | None) -> list[tuple[str, str, str]] | None:
-    """
-    Parse date filter arguments into database filter tuples.
-    Returns None if no date filters provided.
-    """
-    if not date_args:
-        return None
-    
-    date_filters = []
-    for date_str in date_args:
-        match = re.match(r'^\s*([><=!]+)(.+)$', date_str.strip())
-        if match:
-            operator = match.group(1)
-            value = match.group(2).strip()
-            # Normalize != to <> for SQL
-            if operator == '!=':
-                operator = '<>'
-        else:
-            # No operator means equality
-            operator = '='
-            value = date_str.strip()
-
-        date_filters.append(('filing_date', operator, value))
-    
-    return date_filters
-
-
 def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     """
     Select filings with specified filters and return command data.
@@ -229,7 +202,7 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
 
     # Execute database query
     # If ciks is None, select_by_entity will return all filings
-    date_filters = _parse_date_filters(args.date)
+    date_filters = cli.shared.parse_date_constraints(args.date, 'filing_date')
     result = db.queries.filings.select_by_entity(conn,
                                                  ciks = ciks,
                                                  form_types = args.form,

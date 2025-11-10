@@ -23,8 +23,7 @@ def add_arguments(subparsers):
     parser_report = subparsers.add_parser("report", help="generate financial reports from facts")
     parser_report.add_argument("-t", "--ticker", help="company ticker symbol")
     parser_report.add_argument("-g", "--group", required=True, help="group name (required)")
-    parser_report.add_argument("--after", help="filter facts after date (YYYY-MM-DD)")
-    parser_report.add_argument("--before", help="filter facts before date (YYYY-MM-DD)")
+    parser_report.add_argument("--date", nargs="+", metavar='X', help="filter facts by end date constraints ('>2024-01-01', '<=2024-12-31')")
     parser_report.add_argument("--cols", nargs="+", help="filter output columns")
 
     # Period filtering - mutually exclusive
@@ -99,7 +98,8 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
             return err("report: --group is required")
 
         # Get facts for this CIK and group
-        result = _get_facts_for_group(conn, cik, args.group, args.after, args.before)
+        date_filters = cli.shared.parse_date_constraints(args.date, 'end_date')
+        result = _get_facts_for_group(conn, cik, args.group, date_filters)
         if is_not_ok(result):
             conn.close()
             return result
@@ -149,8 +149,7 @@ def _get_facts_for_group(
     conn: sqlite3.Connection,
     cik: str,
     group_name: str,
-    after: str | None,
-    before: str | None
+    date_filters: list[tuple[str, str, str]] | None
 ) -> Result[list[dict[str, Any]], str]:
     """
     Get all facts for a CIK and group.
@@ -246,13 +245,10 @@ def _get_facts_for_group(
     params = [cik] + list(matched_concept_ids)
 
     # Add date filters if specified
-    if after:
-        query += " AND ctx.end_date >= ?"
-        params.append(after)
-
-    if before:
-        query += " AND ctx.end_date <= ?"
-        params.append(before)
+    if date_filters:
+        for field, operator, value in date_filters:
+            query += f" AND ctx.{field} {operator} ?"
+            params.append(value)
 
     query += " ORDER BY d.fiscal_year, d.fiscal_period, c.tag"
 

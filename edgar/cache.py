@@ -2,7 +2,6 @@ import re
 import sys
 import sqlite3
 from typing import Any
-from datetime import datetime
 
 # Local modules
 
@@ -57,22 +56,15 @@ def resolve_entities(conn: sqlite3.Connection, user_agent: str, tickers: list[st
     return ok(found)
 
 
-def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_types: set[str], after_date: datetime | None = None, force: bool = False) -> Result[list[dict[str, Any]], str]:
+def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_types: set[str], date_filters: list[tuple[str, str, str]] | None = None, force: bool = False) -> Result[list[dict[str, Any]], str]:
     """
     Return recent filings for a CIK, fetch and cache if missing.
-    Respects after_date filter for both cached and fresh data.
+    Respects date_filters for both cached and fresh data.
     """
-
-    after_str = after_date.strftime('%Y-%m-%d') if after_date else None
 
     if not force:
         # Check for cached filings with appropriate filter
-
-        if after_date:
-            date_filters = [('filing_date', '>=', after_str)]
-            result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters)
-        else:
-            result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types))
+        result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters)
 
         if is_not_ok(result):
             return result
@@ -87,12 +79,26 @@ def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_ty
     result = xbrl.sec_api.fetch_filings_by_cik(user_agent, cik, form_types)
     if is_not_ok(result):
         return result
-    
+
     all_filings = result[1]
-    if after_str:
-        filtered_filings = [f for f in all_filings if f["filing_date"] >= after_str]
-    else:
-        filtered_filings = all_filings
+
+    # Apply date filters to fetched data
+    filtered_filings = all_filings
+    if date_filters:
+        for field, operator, value in date_filters:
+            if field == 'filing_date':
+                if operator == '>':
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] > value]
+                elif operator == '>=':
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] >= value]
+                elif operator == '<':
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] < value]
+                elif operator == '<=':
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] <= value]
+                elif operator == '=':
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] == value]
+                elif operator in ('!=', '<>'):
+                    filtered_filings = [f for f in filtered_filings if f["filing_date"] != value]
 
     if filtered_filings:
         # Cache the filtered filings

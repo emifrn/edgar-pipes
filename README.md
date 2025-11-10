@@ -128,6 +128,8 @@ facts matching that group's role and concept patterns for the given ticker.
 
 ## Quick Start
 
+**New to edgar-pipes?** Check out [CHEATSHEET.md](CHEATSHEET.md) for a quick command reference with common workflows and patterns.
+
 ### Installation
 
 ```bash

@@ -22,8 +22,8 @@ def add_arguments(subparsers):
     parser_filings = probe_subparsers.add_parser("filings", help="find and cache SEC filings")
     parser_filings.add_argument("-t", "--ticker", metavar='X', help="ticker symbol to probe")
     parser_filings.add_argument("-c", "--cols", metavar='X', nargs="+", help="columns to include in output")
-    parser_filings.add_argument("--after", type=cli.shared.check_date, help="only filings after date (YYYY-MM-DD)")
-    parser_filings.add_argument("--force", action="store_true", help="bypass cache and fetch fresh filings from SEC")    
+    parser_filings.add_argument("--date", nargs="+", metavar='X', help="filter by filing date constraints ('>2024-01-01', '<=2024-12-31')")
+    parser_filings.add_argument("--force", action="store_true", help="bypass cache and fetch fresh filings from SEC")
     parser_filings.set_defaults(func=run)
     
     # probe roles  
@@ -96,11 +96,12 @@ def probe_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
             continue
         
         entity = entities[0]
+        date_filters = cli.shared.parse_date_constraints(args.date, 'filing_date')
         result = cache.resolve_filings(conn,
                                         user_agent,
                                         entity['cik'],
                                         form_types=set(cli.shared.PROBE_FORMS),
-                                        after_date=args.after,
+                                        date_filters=date_filters,
                                         force=args.force)
         if is_not_ok(result):
             print(f"failed: {result[1]}", file=sys.stderr)

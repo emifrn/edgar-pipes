@@ -34,6 +34,52 @@ def check_date(date: str):
         raise argparse.ArgumentTypeError(f"Not a valid date: '{date}'. Expected format: YYYY-MM-DD")
 
 
+def parse_date_constraints(date_args: list[str] | None, field_name: str = 'filing_date') -> list[tuple[str, str, str]] | None:
+    """
+    Parse date filter arguments into database filter tuples.
+
+    Args:
+        date_args: List of date constraints like ['>2024-01-01', '<=2024-12-31']
+        field_name: Database field to filter on (default: 'filing_date')
+
+    Returns:
+        List of (field, operator, value) tuples, or None if no constraints
+
+    Examples:
+        parse_date_constraints(['>2024-01-01'])
+        → [('filing_date', '>', '2024-01-01')]
+
+        parse_date_constraints(['>=2023-01-01', '<2024-01-01'])
+        → [('filing_date', '>=', '2023-01-01'), ('filing_date', '<', '2024-01-01')]
+    """
+    if not date_args:
+        return None
+
+    date_filters = []
+    for date_str in date_args:
+        match = re.match(r'^\s*([><=!]+)(.+)$', date_str.strip())
+        if match:
+            operator = match.group(1)
+            value = match.group(2).strip()
+            # Normalize != to <> for SQL
+            if operator == '!=':
+                operator = '<>'
+        else:
+            # No operator means equality
+            operator = '='
+            value = date_str.strip()
+
+        # Validate date format
+        try:
+            datetime.datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"Invalid date format: '{value}'. Expected YYYY-MM-DD")
+
+        date_filters.append((field_name, operator, value))
+
+    return date_filters
+
+
 def _cols_grep(available_cols: list[str], desired_cols: list[str]) -> Result[list[str], str]:
     """
     Filter available columns to only those that exist in desired list.
