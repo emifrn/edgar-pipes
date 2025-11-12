@@ -42,29 +42,29 @@ def err(message: str) -> str:
     return json.dumps({"ok": False, "name": "error", "data": message})
 
 
-def read() -> Result[Packet | None, str]:
+def read() -> Result[tuple[Packet | None, dict], str]:
     """
-    Read single packet from stdin and convert to internal Packet format.
+    Read single packet from stdin and extract packet and context.
 
     Returns:
-        Ok(Packet) - Successfully parsed packet with cmd and pipeline info
-        Ok(None) - No piped input (terminal start) or empty input
+        Ok((Packet, context)) - Successfully parsed packet with cmd, pipeline, and context
+        Ok((None, {})) - No piped input (terminal start) or empty input
         Err(str) - Error packet received or parsing failure
 
     Behavior:
-        - Returns None if no piped input (start of pipeline)
+        - Returns (None, {}) if no piped input (start of pipeline)
         - Stops on first error packet and returns the error message
-        - Extracts command data and pipeline history
+        - Extracts command data, pipeline history, and context
         - Validates JSON structure
     """
     if sys.stdin.isatty():
-        return result.ok(None)  # No piped input - start of pipeline
+        return result.ok((None, {}))  # No piped input - start of pipeline
 
     # Read first non-empty line as single packet
     line = sys.stdin.readline().strip()
 
     if not line:
-        return result.ok(None)  # Empty input
+        return result.ok((None, {}))  # Empty input
 
     try:
         envelope = json.loads(line)
@@ -92,15 +92,18 @@ def read() -> Result[Packet | None, str]:
         "data": envelope["data"]
     }
 
-    # Extract pipeline history if available, otherwise start fresh
-    pipeline = envelope.get("pipeline", [])
+    # Extract context
+    context = envelope.get("context", {})
+
+    # Extract pipeline from context
+    pipeline = context.get("pipeline", [])
 
     packet = {
         "cmd": cmd,
         "pipeline": pipeline
     }
 
-    return result.ok(packet)
+    return result.ok((packet, context))
 
 
 def build_current_command() -> str:
@@ -108,13 +111,17 @@ def build_current_command() -> str:
     return ' '.join(shlex.quote(arg) for arg in sys.argv[1:])
 
 
-def write(packet: Packet) -> None:
-    """Write packet to stdout in JSON envelope format."""
+def write(packet: Packet, context: dict) -> None:
+    """Write packet to stdout in JSON envelope format with context."""
+    # Build context with pipeline history
+    context_out = dict(context)
+    context_out["pipeline"] = packet["pipeline"]
+
     envelope = {
         "ok": True,
         "name": packet["cmd"]["name"],
         "data": packet["cmd"]["data"],
-        "pipeline": packet["pipeline"]
+        "context": context_out
     }
     print(json.dumps(envelope))
 

@@ -14,6 +14,7 @@ import sys
 import sqlite3
 
 # Local modules
+from edgar import config
 from edgar import db
 from edgar import cache
 from edgar.cli.shared import Cmd
@@ -77,7 +78,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
     3. Derivation: --from Balance [filters...] (filters optional, AND logic)
     """
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -168,7 +169,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
     2. Derivation: --from Balance [filters...] (filters optional, AND logic)
     """
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):

@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any, Optional
 
 # Local modules
+from edgar import config
 from edgar import db
 from edgar import xbrl
 from edgar import cli
@@ -122,7 +123,7 @@ def run(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Route to appropriate select subcommand with input data from main."""
 
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         # Initialize database if needed
         result = db.store.init(conn)

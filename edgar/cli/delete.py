@@ -12,6 +12,7 @@ from typing import Any
 from collections import defaultdict
 
 # Local modules
+from edgar import config
 from edgar import db
 from edgar import cli
 from edgar import xbrl
@@ -361,7 +362,7 @@ def run(cmd: Cmd, args) -> Result[Cmd | None, str]:
         
         if cmd["name"] in delete:
             if args.yes:
-                conn = sqlite3.connect(args.db)
+                conn = sqlite3.connect(config.get_db_path(args.workspace))
                 result = db.store.init(conn)
                 if is_not_ok(result):
                     conn.close()

@@ -9,7 +9,9 @@ import sys
 import sqlite3
 
 # Local modules
+from edgar import config
 from edgar import db
+from edgar import config
 from edgar import db
 from edgar import cache
 from edgar import cli
@@ -49,7 +51,7 @@ def add_arguments(subparsers):
     parser_group.add_argument("--from", dest="source_group", help="source group to derive from")
 
     # Concept filters (default, common case)
-    parser_group.add_argument("--uid", "-u", metavar='X', nargs="+", type=int, help="filter concepts by user IDs")
+    parser_group.add_argument("-u", "--uid", metavar='X', nargs="+", type=int, help="filter concepts by user IDs")
     parser_group.add_argument("--pattern", metavar='X', help="filter concepts by name regex")
     parser_group.add_argument("--exclude", metavar='X', help="exclude concepts by name regex")
     parser_group.add_argument("--names", metavar='X', nargs="+", help="filter concepts by names")
@@ -92,7 +94,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         return err(f"new concept: invalid regex pattern: {e}")
 
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -153,7 +155,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         return err(f"new role: invalid regex pattern: {e}")
 
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -206,7 +208,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
     Create a group, optionally derived from another group.
     """
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):

@@ -7,7 +7,7 @@ Quick reference for the most common edgar-pipes commands and patterns.
 Work with all commands:
 
 ```bash
---db FILE           # Override database path
+-w, --ws PATH       # Workspace directory (default: current directory)
 -d, --debug         # Print pipeline data to stderr
 -j, --json          # Output as JSONL
 -t, --table         # Output as table
@@ -59,33 +59,6 @@ ep update -t TICKER -g Balance
 
 # 12. Generate reports
 ep report -t TICKER -g Balance --quarterly
-```
-
----
-
-## Pattern Syntax
-
-Regex patterns for matching roles and concepts:
-
-```regex
-^TagName$              # Exact match (most common)
-^(TagA|TagB)$          # Match either TagA or TagB
-^Tag.*$                # Prefix match (any tag starting with "Tag")
-(?i)pattern            # Case insensitive match
-Tag(1?|Parenthetical)  # Optional suffixes: Tag, Tag1, TagParenthetical
-```
-
-**Common patterns:**
-
-```bash
-# Balance sheet roles (handles variations across years)
-'StatementConsolidatedBalanceSheets(1?|Parenthetical)|BALANCESHEETS(Parenthetical)?'
-
-# Income statement roles
-'^(Role_)?Statement.*Operations$'
-
-# Cash flow roles
-'^(Role_)?Statement.*CashFlows$'
 ```
 
 ---
@@ -231,22 +204,6 @@ ep report -t TICKER -g Balance | ep calc \
 
 ## Journaling
 
-### Managing Journals
-
-```bash
-# List available journals
-ep journal list
-
-# Switch to named journal
-ep journal use project_name
-
-# Return to default journal
-ep journal use
-
-# Check current journal and status
-ep journal current
-```
-
 ### Recording Control
 
 ```bash
@@ -263,27 +220,20 @@ ep journal status
 ### Replay
 
 ```bash
-# Replay entire current journal
+# Replay entire journal
 ep journal replay
 
 # Replay specific entries
 ep journal replay 5 10 15          # Specific indices
 ep journal replay 1:50             # Range
 ep journal replay 1:10,20:30       # Multiple ranges
-
-# Replay from named journal
-ep journal replay myjournal
-ep journal replay myjournal[1:50]
 ```
 
 ### History
 
 ```bash
-# View recent commands
+# View recent commands (from current workspace)
 ep history
-
-# View specific journal
-ep history project_name
 
 # Show more entries
 ep history --limit 50
@@ -422,14 +372,18 @@ ep select filings -t TICKER | ep select roles -g GROUP | ep select concepts -p '
 - Unique per ticker, can reuse across different companies
 - Makes bulk operations easier: `ep add concept -g GROUP -t TICKER -u 1 2 3 4 5`
 
-### Database Management
+### Workspaces
 
 ```bash
-# Use different database for testing
-ep --db /tmp/test.db probe filings -t TICKER
+# Create workspace and auto-detect
+mkdir aapl && cd aapl
+ep probe filings -t aapl
 
-# Or set environment variable for session
-export EDGAR_PIPES_DB_PATH=/tmp/test.db
+# Use explicit workspace from anywhere
+ep -w aapl probe filings -t aapl
+
+# Workspace propagates through pipelines (only first command needs -w)
+ep -w aapl probe filings -t aapl | ep select filings | ep select roles
 ```
 
 ### Debugging
@@ -494,7 +448,7 @@ ep report -t TICKER -g Operations --quarterly | \
 ## Configuration
 
 ```bash
-# View current configuration
+# View current configuration and workspace info
 ep config show
 
 # View environment variables
@@ -503,11 +457,11 @@ ep config env
 # Configuration file location
 ~/.config/edgar-pipes/config.toml
 
-# Database default location
-~/.local/share/edgar-pipes/edgar.db
-
-# Journal default location
-~/.local/share/edgar-pipes/journals/
+# Workspace structure (created in current directory)
+workspace/
+  ├── store.db              # SQLite database
+  └── journal/
+      └── journal.jsonl     # Command history
 ```
 
 ---

@@ -11,7 +11,9 @@ from typing import Any
 from collections import defaultdict
 
 # Local
+from edgar import config
 from edgar import db
+from edgar import config
 from edgar import db
 from edgar import cli
 from edgar.cli.shared import Cmd
@@ -55,7 +57,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         ok(Cmd) - Report data in wide format
         err(str) - Error occurred
     """
-    conn = sqlite3.connect(args.db)
+    conn = sqlite3.connect(config.get_db_path(args.workspace))
     conn.row_factory = sqlite3.Row
 
     try:

@@ -37,14 +37,17 @@ def run(cmd: Cmd, args) -> Result[None, str]:
 
 
 def run_show(cmd: Cmd, args) -> Result[None, str]:
-    """Show current configuration and data locations."""
+    """Show current configuration and workspace info."""
     config = cfg.load_config()
     config_path = cfg.get_config_path()
-    db_path = cfg.get_database_path(config)
-    journal_path = cfg.get_journal_path(config)
+    workspace = args.workspace
 
     # Check if config file exists
     config_status = "✓" if config_path.exists() else "✗ (not created yet)"
+
+    # Get workspace paths
+    db_path = cfg.get_db_path(workspace)
+    journal_path = cfg.get_journal_path(workspace)
 
     # Get database size if it exists
     db_info = ""
@@ -80,8 +83,6 @@ def run_show_env(cmd: Cmd, args) -> Result[None, str]:
     # Check which environment variables are set
     env_vars = {
         "EDGAR_PIPES_USER_AGENT": os.getenv("EDGAR_PIPES_USER_AGENT"),
-        "EDGAR_PIPES_DB_PATH": os.getenv("EDGAR_PIPES_DB_PATH"),
-        "EDGAR_PIPES_JOURNAL_PATH": os.getenv("EDGAR_PIPES_JOURNAL_PATH"),
         "EDGAR_PIPES_THEME": os.getenv("EDGAR_PIPES_THEME"),
         "XDG_CONFIG_HOME": os.getenv("XDG_CONFIG_HOME"),
     }

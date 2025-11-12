@@ -128,7 +128,8 @@ facts matching that group's role and concept patterns for the given ticker.
 
 ## Quick Start
 
-**New to edgar-pipes?** Check out [CHEATSHEET.md](CHEATSHEET.md) for a quick command reference with common workflows and patterns.
+**New to edgar-pipes?** Check out [CHEATSHEET.md](CHEATSHEET.md) for a quick
+command reference with common workflows and patterns.
 
 ### Installation
 
@@ -172,28 +173,31 @@ ep config show
 nano ~/.config/edgar-pipes/config.toml
 ```
 
-### Working with Multiple Databases
+### Working with Workspaces
 
-edgar-pipes supports multiple databases for different projects or testing. You
-can switch databases at three levels:
+edgar-pipes uses workspaces to organize your analysis. A workspace is a directory containing:
+- `store.db` - SQLite database with filings, roles, concepts, and facts
+- `journal/journal.jsonl` - Command history for reproducibility
 
 ```bash
-# Single command (most temporary)
-ep --db /tmp/test.db probe filings -t AAPL
+# Create and use a workspace
+mkdir aapl && cd aapl
+ep probe filings -t AAPL  # Auto-creates store.db and journal/
 
-# Current shell session (for pipelines)
-export EDGAR_PIPES_DB_PATH=/tmp/test.db
-ep probe filings -t AAPL
-ep select filings -t AAPL | ep probe roles
+# Or use explicit workspace flag
+ep -w aapl probe filings -t AAPL
 
-# Permanent (all sessions)
-# Edit ~/.config/edgar-pipes/config.toml:
-# [database]
-# path = "/path/to/your/database.db"
+# Workspace propagates through pipelines
+ep -w aapl probe filings -t AAPL | ep select filings | ep select roles
+# Only first command needs -w, rest inherit from context
+
+# Switch workspaces by changing directory
+cd ../msft
+ep probe filings -t MSFT
 ```
 
-This is useful for separating production data from experiments, or maintaining
-separate databases for different analysis projects.
+Workspaces let you maintain separate analyses for different companies or projects,
+with database and journal always kept together.
 
 ### Workflows
 
@@ -321,18 +325,17 @@ ep update -t <TICKER> -g <GROUP> --force
 
 #### Journals
 
-edgar-pipes automatically tracks commands in the active journal. Various
-commands enable silencing, switching and replaying journals. This mechanism
-is useful for reproducing workflows, regenerating databases, adapting workflows
-for new companies, and sharing analysis. Below are a few command examples:
-
+edgar-pipes automatically tracks commands in each workspace's journal. This
+enables reproducing workflows, regenerating databases, and sharing analysis.
+Each workspace has its own `journal/journal.jsonl` file that records command
+history.
 
 ```bash
-# List available journals
-ep journal list
+# View command history for current workspace
+ep history
 
-# View current journal entries
-ep journal current
+# View recent 10 entries
+ep history --limit 10
 
 # Suspend journal recording
 ep journal off
@@ -340,20 +343,18 @@ ep journal off
 # Resume journal recording
 ep journal on
 
-# Replay all commands from a journal
+# Check journal status
+ep journal status
+
+# Replay all commands from journal
 ep journal replay
 
-# Replay specific commands
+# Replay specific commands by index
 ep journal replay 5:10,13,15,18:22
+ep journal replay 1,5,8
 
-# Switch to a different journal
-ep journal use <JOURNAL_NAME>
-
-# Return to default journal
-ep journal use
-
-# Journals can be inspected with the command history
-ep history
+# Replay from different workspace
+ep -w ~/aapl journal replay
 ```
 
 #### Reports

@@ -17,12 +17,6 @@ DEFAULT_CONFIG = {
     "edgar": {
         "user_agent": "edgar-pipes/0.1.0",  # Fallback (not ideal, prompt user)
     },
-    "database": {
-        "path": "~/.local/share/edgar-pipes/store.db",
-    },
-    "journal": {
-        "path": "~/.local/share/edgar-pipes/journals",
-    },
     "output": {
         "theme": "nobox-minimal",
     },
@@ -45,8 +39,6 @@ def load_config() -> dict[str, Any]:
     # Start with defaults
     config = {
         "edgar": DEFAULT_CONFIG["edgar"].copy(),
-        "database": DEFAULT_CONFIG["database"].copy(),
-        "journal": DEFAULT_CONFIG["journal"].copy(),
         "output": DEFAULT_CONFIG["output"].copy(),
     }
 
@@ -66,8 +58,6 @@ def load_config() -> dict[str, Any]:
     # 2. Override with environment variables
     env_overrides = {
         "EDGAR_PIPES_USER_AGENT": ("edgar", "user_agent"),
-        "EDGAR_PIPES_DB_PATH": ("database", "path"),
-        "EDGAR_PIPES_JOURNAL_PATH": ("journal", "path"),
         "EDGAR_PIPES_THEME": ("output", "theme"),
     }
 
@@ -110,14 +100,6 @@ def init_config_interactive() -> bool:
 # Your identity for SEC EDGAR API requests
 user_agent = "{user_agent}"
 
-[database]
-# Database file location
-path = "~/.local/share/edgar-pipes/store.db"
-
-[journal]
-# Journal storage location
-path = "~/.local/share/edgar-pipes/journals"
-
 [output]
 # Default table theme
 theme = "nobox-minimal"
@@ -133,35 +115,46 @@ theme = "nobox-minimal"
     return True
 
 
-def ensure_data_dirs(config: dict) -> None:
+def get_workspace_path(workspace_arg: str | None, context_workspace: str | None) -> Path:
     """
-    Ensure database and journal directories exist.
-    Called once at startup.
-    """
-    # Create database directory
-    db_path = get_database_path(config)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    Resolve workspace with priority:
+    1. --ws flag (explicit)
+    2. Context from pipeline
+    3. Current directory (default)
 
-    # Create journal directory
-    journal_path = get_journal_path(config)
-    journal_path.mkdir(parents=True, exist_ok=True)
+    Returns Path to workspace directory.
+    Raises RuntimeError if explicit workspace doesn't exist.
+    """
+    if workspace_arg:
+        ws = Path(workspace_arg).expanduser().resolve()
+        if not ws.is_dir():
+            raise RuntimeError(f"workspace not found: {ws}")
+        return ws
+
+    if context_workspace:
+        return Path(context_workspace)
+
+    return Path.cwd()
+
+
+def get_db_path(workspace: Path) -> Path:
+    """Get database file path within workspace."""
+    return workspace / "store.db"
+
+
+def get_journal_path(workspace: Path) -> Path:
+    """Get journal file path within workspace."""
+    return workspace / "journal" / "journal.jsonl"
+
+
+def get_silence_path(workspace: Path) -> Path:
+    """Get journal silence flag path within workspace."""
+    return workspace / "journal" / "silence"
 
 
 def get_user_agent(config: dict) -> str:
     """Get user agent for EDGAR API requests."""
     return config["edgar"]["user_agent"]
-
-
-def get_database_path(config: dict) -> Path:
-    """Get database file path, expanding ~ if needed."""
-    path = config["database"]["path"]
-    return Path(path).expanduser()
-
-
-def get_journal_path(config: dict) -> Path:
-    """Get journal directory path, expanding ~ if needed."""
-    path = config["journal"]["path"]
-    return Path(path).expanduser()
 
 
 def get_theme(config: dict) -> str:

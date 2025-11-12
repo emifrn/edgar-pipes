@@ -13,9 +13,9 @@ from .result import Result, ok, err, is_ok, is_not_ok
 
 def add_arguments(parser):
     """Define the CLI interface and register all available subcommands."""
-    
+
     # Global options for main edgar command
-    parser.add_argument("--db", metavar="FILE", help="select database")
+    parser.add_argument("-w", "--ws", metavar="PATH", help="workspace directory (default: current directory)")
     parser.add_argument("-d", "--debug", action="store_true", help="print pipeline data to stderr")
 
     # Add mutually exclusive format options as global flags
@@ -72,54 +72,71 @@ def cli_main(args):
     """
     try:
         current_cmd = pipeline.build_current_command()
-        if cli.journal.should_journal_command(current_cmd) and sys.stdin.isatty():
-            status_bar = cli.journal.get_status_bar()
-            if status_bar:
-                print(status_bar, file=sys.stderr)
 
-        # Read packet from previous pipeline stage
+        # Read packet and context from previous pipeline stage
         stdin_result = pipeline.read()
         if is_not_ok(stdin_result):
             error_msg = stdin_result[1]
-            if not cli.journal.is_silent():
-                cli.journal.write_entry([current_cmd], "ERROR", error_msg)
-            
+            # Can't write to journal yet - don't have workspace
             if pipeline.output_format() == 'packet':
                 print(pipeline.err(error_msg))
             else:
                 print(error_msg, file=sys.stderr)
             return
 
+        # Extract packet and context
+        input_packet, input_context = stdin_result[1]
+
+        # Resolve workspace (priority: --ws flag, context, current directory)
+        try:
+            workspace = config.get_workspace_path(args.ws, input_context.get("workspace"))
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return
+
+        # Set workspace in args for commands
+        args.workspace = workspace
+
+        # Display journal status bar if appropriate
+        if cli.journal.should_journal_command(current_cmd) and sys.stdin.isatty():
+            status_bar = cli.journal.get_status_bar(workspace)
+            if status_bar:
+                print(status_bar, file=sys.stderr)
+
+        # Build context for output
+        context = {"workspace": str(workspace)}
+
         # Build packet with pipeline history
-        input_packet = stdin_result[1]  # None if start of pipeline
         packet = pipeline.add(input_packet, current_cmd)
         
         # Execute command with Cmd pattern
         cmd = packet["cmd"] if input_packet else {"name": "", "data": []}
         result = args.func(cmd, args)
-        
+
+        # Get journal path for writing
+        journal_path = config.get_journal_path(workspace)
+
         # Handle command result
         if is_not_ok(result):
             error_msg = result[1]
-            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent():
-                cli.journal.write_entry(packet["pipeline"], "ERROR", error_msg)
-            
+            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+                cli.journal.write_entry(journal_path, packet["pipeline"], "ERROR", error_msg)
+
             if pipeline.output_format() == 'packet':
                 print(pipeline.err(error_msg))
             else:
                 print(error_msg, file=sys.stderr)
-                
+
         elif result[1] is None:
             # Command completed with no data output
-            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent():
-                cli.journal.write_entry(packet["pipeline"], "OK", None)
+            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+                cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
         else:
             # Command returned data - handle format override or continue pipeline
             output_packet = {
                 "cmd": result[1],
-                "pipeline": packet["pipeline"]
-            }
+                "pipeline": packet["pipeline"]}
 
             # Debug output: show current data to stderr
             if args.debug:
@@ -133,10 +150,10 @@ def cli_main(args):
 
             # Determine actual output format
             output_format = get_output_format(args)
-            
+
             if output_format == 'packet':
-                # Continue pipeline - output JSON packet
-                pipeline.write(output_packet)
+                # Continue pipeline - output JSON packet with context
+                pipeline.write(output_packet, context)
             else:
                 # Terminal output - format according to user preference or auto-detection
                 if output_format == 'json':
@@ -146,17 +163,19 @@ def cli_main(args):
                 else:  # table or default
                     theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))
-                
-                if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent():
-                    cli.journal.write_entry(packet["pipeline"], "OK", None)
+
+                if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+                    cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
     except KeyboardInterrupt:
         print("main: keyboard interrupt", file=sys.stderr)
     except Exception as e:
         error_msg = f"main: unexpected error: {e}"
+        # Best effort journal write (may fail if workspace not set)
         try:
-            if not cli.journal.is_silent():
-                cli.journal.write_entry([current_cmd], "ERROR", error_msg)
+            if 'workspace' in locals() and not cli.journal.is_silent(workspace):
+                journal_path = config.get_journal_path(workspace)
+                cli.journal.write_entry(journal_path, [current_cmd], "ERROR", error_msg)
         except:
             pass  # Don't fail on journal errors during exception handling
         print(error_msg, file=sys.stderr)
@@ -170,15 +189,7 @@ def main():
     # Check if user_agent is still default (first run - needs setup)
     if cfg["edgar"]["user_agent"] == "edgar-pipes/0.1.0":
         config.init_config_interactive()
-        # Reload config after interactive setup
         cfg = config.load_config()
-
-    # Ensure data directories exist
-    config.ensure_data_dirs(cfg)
-
-    # Get paths from config
-    db_path = str(config.get_database_path(cfg))
-    journal_path_str = str(config.get_journal_path(cfg))
 
     parser = argparse.ArgumentParser(
         prog='ep',
@@ -192,33 +203,34 @@ Available themes:
 
 Environment variables:
   EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
-  EDGAR_PIPES_DB_PATH       Database file location
-  EDGAR_PIPES_JOURNAL_PATH  Journal storage directory
-  EDGAR_PIPES_THEME         Default table theme (default: financial-light)
+  EDGAR_PIPES_THEME         Default table theme
 
 Configuration:
   Config file: ~/.config/edgar-pipes/config.toml
   Use "ep config show" to view configuration
   Use "ep config env" to view environment variables
 
+Workspace:
+  Workspace contains store.db and journal/journal.jsonl
+  Default: current directory
+  Override: -w PATH or --ws PATH
+
 Examples:
+  mkdir aapl && cd aapl
   ep probe filings -t AAPL --force
   ep select patterns -t AEO -g Balance
   ep new group "Current Assets" --from Balance -t AEO --uid 1 2 3
   ep select concepts -t AAPL | ep delete -y
-  ep select filings -t AEO | select roles -g Balance | probe concepts
+  ep -w aapl select filings | select roles -g Balance | probe concepts
 
 Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.set_defaults(
-        db=db_path,
+        config=cfg,
         func=lambda cmd, args: err("No command specified. Use -h for help")
     )
     add_arguments(parser)
     args = parser.parse_args()
-
-    # Store config in args for commands that need it
-    args.config = cfg
 
     cli_main(args)
 

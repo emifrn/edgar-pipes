@@ -10,7 +10,9 @@ import sys
 import sqlite3
 
 # Local modules
+from edgar import config
 from edgar import db
+from edgar import config
 from edgar import db
 from edgar.cli.shared import Cmd
 from edgar.result import Result, ok, err, is_ok, is_not_ok
@@ -79,7 +81,7 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Modify group names or remove patterns with preview/execute workflow."""
 
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -309,7 +311,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
             return err(f"modify role: invalid regex pattern: {e}")
     
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
         
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -384,7 +386,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
             return err(f"modify concept: invalid regex pattern: {e}")
     
     try:
-        conn = sqlite3.connect(args.db)
+        conn = sqlite3.connect(config.get_db_path(args.workspace))
         
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -498,8 +500,8 @@ def _preview_remove_roles(group_id: int, group_name: str, patterns: list[dict]) 
             "operation": "remove_role_from_group",
             "name": pattern.get("name"),
             "group": group_name,
-            "status": "preview"
-        })
+            "status": "preview"})
+
     return ok({"name": "modify_preview", "data": preview_data})
 
 
@@ -519,8 +521,7 @@ def _execute_remove_roles(conn: sqlite3.Connection, group_id: int, group_name: s
                 "operation": "remove_role_from_group",
                 "name": pattern.get("name"),
                 "group": group_name,
-                "status": "removed"
-            })
+                "status": "removed"})
 
         conn.commit()
         return ok({"name": "modify_result", "data": results})
