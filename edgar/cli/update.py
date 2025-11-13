@@ -157,7 +157,8 @@ def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map:
     if not all_candidates:
         return err("0 candidates found")
 
-    chosen = _choose_best_per_group(conn, cik, fiscal_year, fiscal_period, all_candidates)
+    doc_period_end = dei.get("doc_period_end")
+    chosen = _choose_best_per_group(conn, cik, fiscal_year, fiscal_period, all_candidates, doc_period_end)
 
     # Insert facts
     result = db.queries.facts.insert(conn, chosen)
@@ -232,7 +233,7 @@ def _facts_to_records(conn: sqlite3.Connection, cik: str, facts: Iterable[Any], 
     return out
 
 
-def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str, fiscal_period: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str, fiscal_period: str, records: list[dict[str, Any]], doc_period_end: str | None = None) -> list[dict[str, Any]]:
     fact_groups: dict[tuple[int, bool, tuple[tuple[str, str], ...]], list[dict[str, Any]]] = defaultdict(list)
 
     for r in records:
@@ -254,11 +255,19 @@ def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str,
             past_periods: list[tuple[str, str]] = [(row["mode"], row["fiscal_period"]) for row in past_rows]
 
         # Check if this is a stock variable (all instant) or flow variable (has periods)
-        # Stock variables (balance sheet): just pick any instant fact (they're all the same date/value)
+        # Stock variables (balance sheet): pick instant matching doc_period_end, or most recent
         # Flow variables (income/cash flow): use sophisticated QTD vs YTD selection logic
         if all(item.get("mode") == "instant" for item in items):
-            # Stock variable: pick the first instant value
-            best = next((f for f in items if f["mode"] == "instant"), None)
+            # Stock variable: pick instant matching doc_period_end, or most recent
+            best = None
+
+            # Try to match doc_period_end exactly
+            if doc_period_end:
+                best = next((f for f in items if f["end_date"].isoformat() == doc_period_end), None)
+
+            # Fallback: pick most recent instant (current period)
+            if best is None:
+                best = max(items, key=lambda f: f["end_date"], default=None)
         else:
             # Flow variable: use period-based selection
             match (fiscal_period.upper() if isinstance(fiscal_period, str) else fiscal_period):
