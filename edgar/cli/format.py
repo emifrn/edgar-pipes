@@ -40,7 +40,7 @@ def as_csv(data: list[dict]) -> str:
                 if key not in seen:
                     headers.append(key)
                     seen.add(key)
-        writer = csv.DictWriter(output, fieldnames=headers)
+        writer = csv.DictWriter(output, fieldnames=headers, lineterminator='\n')
         writer.writeheader()
         writer.writerows(data)
         return output.getvalue().rstrip()  # Remove trailing newline
