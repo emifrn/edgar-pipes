@@ -8,10 +8,12 @@ Work with all commands:
 
 ```bash
 -w, --ws PATH       # Workspace directory (default: current directory)
+-j, --journal [NAME] # Record command to journal (default or named)
 -d, --debug         # Print pipeline data to stderr
--j, --json          # Output as JSONL
--t, --table         # Output as table
+--json              # Output as JSONL
+--table             # Output as table
 --csv               # Output as CSV
+--gp                # Output in gnuplot format (TSV with comment headers)
 --theme THEME       # Table theme (default, minimal, grid, financial, etc.)
 ```
 
