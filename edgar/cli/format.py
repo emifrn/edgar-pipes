@@ -55,6 +55,37 @@ def as_json(data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def as_gp(data: list[dict]) -> str:
+    """Format data as gnuplot-friendly TSV with comment header."""
+    if not data:
+        return ""
+
+    # Collect all unique field names across all records (handles sparse data)
+    headers = []
+    seen = set()
+    for record in data:
+        for key in record.keys():
+            if key not in seen:
+                headers.append(key)
+                seen.add(key)
+
+    # Build output lines
+    lines = []
+
+    # Add comment header line
+    lines.append("# " + "\t".join(headers))
+
+    # Add data rows
+    for record in data:
+        row = []
+        for header in headers:
+            value = record.get(header, "")
+            row.append(str(value) if value is not None else "")
+        lines.append("\t".join(row))
+
+    return '\n'.join(lines)
+
+
 def as_table(data: list[dict], theme_name: str = None) -> str:
     """Format data as Rich-themed table string."""
     if not data:

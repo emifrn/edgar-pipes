@@ -23,6 +23,7 @@ def add_arguments(parser):
     format_group.add_argument("-j", "--json", action="store_true", help="output in JSON format (JSONL)")
     format_group.add_argument("-t", "--table", action="store_true", help="output in table format")
     format_group.add_argument("--csv", action="store_true", help="output in CSV format")
+    format_group.add_argument("-g", "--gp", action="store_true", help="output in gnuplot format (TSV with comment headers)")
     
     parser.add_argument("--theme", metavar="X", 
                         choices=["default", "financial", "financial-light", 
@@ -61,6 +62,8 @@ def get_output_format(args):
         return 'table'
     elif args.csv:
         return 'csv'
+    elif args.gp:
+        return 'gp'
     else:
         # Automatic detection
         return pipeline.output_format()
@@ -160,6 +163,8 @@ def cli_main(args):
                     print(cli.format.as_json(result[1]["data"]))
                 elif output_format == 'csv':
                     print(cli.format.as_csv(result[1]["data"]))
+                elif output_format == 'gp':
+                    print(cli.format.as_gp(result[1]["data"]))
                 else:  # table or default
                     theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))
