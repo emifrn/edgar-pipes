@@ -16,6 +16,8 @@ def add_arguments(parser):
 
     # Global options for main edgar command
     parser.add_argument("-w", "--ws", metavar="PATH", help="workspace directory (default: current directory)")
+    parser.add_argument("-j", "--journal", nargs="?", const="default", metavar="NAME",
+                       help="record command to journal (default: journals/default.jsonl, or journals/NAME.jsonl)")
     parser.add_argument("-d", "--debug", action="store_true", help="print pipeline data to stderr")
 
     # Add mutually exclusive format options as global flags
@@ -100,12 +102,6 @@ def cli_main(args):
         # Set workspace in args for commands
         args.workspace = workspace
 
-        # Display journal status bar if appropriate
-        if cli.journal.should_journal_command(current_cmd) and sys.stdin.isatty():
-            status_bar = cli.journal.get_status_bar(workspace)
-            if status_bar:
-                print(status_bar, file=sys.stderr)
-
         # Build context for output
         context = {"workspace": str(workspace)}
 
@@ -116,13 +112,19 @@ def cli_main(args):
         cmd = packet["cmd"] if input_packet else {"name": "", "data": []}
         result = args.func(cmd, args)
 
-        # Get journal path for writing
-        journal_path = config.get_journal_path(workspace)
+        # Get history path for automatic recording (always on)
+        history_path = config.get_history_path()
 
         # Handle command result
         if is_not_ok(result):
             error_msg = result[1]
-            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+
+            # Always write to history (tmp)
+            cli.journal.write_entry(history_path, packet["pipeline"], "ERROR", error_msg)
+
+            # Conditionally write to explicit journal
+            if hasattr(args, 'journal') and args.journal:
+                journal_path = config.get_journal_path(workspace, args.journal)
                 cli.journal.write_entry(journal_path, packet["pipeline"], "ERROR", error_msg)
 
             if pipeline.output_format() == 'packet':
@@ -132,7 +134,13 @@ def cli_main(args):
 
         elif result[1] is None:
             # Command completed with no data output
-            if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+
+            # Always write to history (tmp)
+            cli.journal.write_entry(history_path, packet["pipeline"], "OK", None)
+
+            # Conditionally write to explicit journal
+            if hasattr(args, 'journal') and args.journal:
+                journal_path = config.get_journal_path(workspace, args.journal)
                 cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
         else:
@@ -169,17 +177,26 @@ def cli_main(args):
                     theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))
 
-                if cli.journal.should_journal_command(current_cmd) and not cli.journal.is_silent(workspace):
+                # Always write to history (tmp)
+                cli.journal.write_entry(history_path, packet["pipeline"], "OK", None)
+
+                # Conditionally write to explicit journal
+                if hasattr(args, 'journal') and args.journal:
+                    journal_path = config.get_journal_path(workspace, args.journal)
                     cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
     except KeyboardInterrupt:
         print("main: keyboard interrupt", file=sys.stderr)
     except Exception as e:
         error_msg = f"main: unexpected error: {e}"
-        # Best effort journal write (may fail if workspace not set)
+        # Best effort history write
         try:
-            if 'workspace' in locals() and not cli.journal.is_silent(workspace):
-                journal_path = config.get_journal_path(workspace)
+            history_path = config.get_history_path()
+            cli.journal.write_entry(history_path, [current_cmd], "ERROR", error_msg)
+
+            # Also write to explicit journal if requested
+            if 'args' in locals() and hasattr(args, 'journal') and args.journal and 'workspace' in locals():
+                journal_path = config.get_journal_path(workspace, args.journal)
                 cli.journal.write_entry(journal_path, [current_cmd], "ERROR", error_msg)
         except:
             pass  # Don't fail on journal errors during exception handling
@@ -216,7 +233,7 @@ Configuration:
   Use "ep config env" to view environment variables
 
 Workspace:
-  Workspace contains store.db and journal/journal.jsonl
+  Workspace contains store.db and journals/ directory
   Default: current directory
   Override: -w PATH or --ws PATH
 

@@ -115,76 +115,6 @@ def read_entries(journal_path: Path) -> Result[list[dict], str]:
         return err(f"cli.journal.read_entries: {e}")
 
 
-def is_silent(workspace: Path) -> bool:
-    """Check if journal recording is silenced for this workspace."""
-    from edgar import config
-    silence_file = config.get_silence_path(workspace)
-    return silence_file.exists()
-
-
-def journal_on(workspace: Path) -> Result[None, str]:
-    """Enable journal recording."""
-    try:
-        from edgar import config
-        silence_file = config.get_silence_path(workspace)
-
-        if silence_file.exists():
-            silence_file.unlink()
-            print("Journal recording enabled", file=sys.stderr)
-        else:
-            print("Journal recording already enabled", file=sys.stderr)
-
-        return ok(None)
-    except Exception as e:
-        return err(f"cli.journal.journal_on: {e}")
-
-
-def journal_off(workspace: Path) -> Result[None, str]:
-    """Disable journal recording."""
-    try:
-        from edgar import config
-        silence_file = config.get_silence_path(workspace)
-        silence_file.parent.mkdir(parents=True, exist_ok=True)
-
-        if silence_file.exists():
-            print("Journal recording already disabled", file=sys.stderr)
-        else:
-            silence_file.touch()
-            print("Journal recording disabled", file=sys.stderr)
-
-        return ok(None)
-    except Exception as e:
-        return err(f"cli.journal.journal_off: {e}")
-
-
-def journal_status(workspace: Path) -> Result[None, str]:
-    """Show journal recording status."""
-    try:
-        from edgar import config
-        recording_state = "disabled (off)" if is_silent(workspace) else "enabled (on)"
-        journal_path = config.get_journal_path(workspace)
-
-        print(f"Workspace: {workspace}", file=sys.stderr)
-        print(f"Journal: {journal_path}", file=sys.stderr)
-        print(f"Recording: {recording_state}", file=sys.stderr)
-
-        return ok(None)
-    except Exception as e:
-        return err(f"cli.journal.journal_status: {e}")
-
-def get_status_bar(workspace: Path) -> str:
-    """
-    Generate status bar line showing recording state.
-    Returns colored string ready for stderr output, or empty string if recording is off.
-    """
-    # Only show status bar when recording is enabled
-    if is_silent(workspace):
-        return ""
-
-    indicator = "\033[90m●\033[0m"  # Dim gray filled circle
-
-    # Format: ● journal: on
-    return f"{indicator} \033[90mjournal: on\033[0m"
 
 
 # =============================================================================
@@ -309,11 +239,11 @@ def parse_indices(indices_str: str) -> Result[tuple[list[int], bool], str]:
     return ok((indices, is_lenient))
 
 
-def journal_replay(workspace: Path, targets: list[str]) -> Result[None, str]:
+def journal_replay(workspace: Path, journal_name: str, targets: list[str]) -> Result[None, str]:
     """Replay journal commands from workspace."""
     from edgar import config
 
-    journal_path = config.get_journal_path(workspace)
+    journal_path = config.get_journal_path(workspace, journal_name)
 
     # Parse indices if provided
     indices = None
@@ -363,15 +293,10 @@ def execute_entries(entries: list[dict]) -> Result[None, str]:
 # =============================================================================
 
 def run_journal(cmd: Cmd, args) -> Result[None, str]:
-    """Handle journal management subcommands."""
+    """Handle journal replay command."""
     if args.journal_cmd == 'replay':
-        return journal_replay(args.workspace, args.targets)
-    elif args.journal_cmd == 'on':
-        return journal_on(args.workspace)
-    elif args.journal_cmd == 'off':
-        return journal_off(args.workspace)
-    elif args.journal_cmd == 'status':
-        return journal_status(args.workspace)
+        journal_name = args.journal_name if hasattr(args, 'journal_name') else "default"
+        return journal_replay(args.workspace, journal_name, args.targets)
     else:
         return err("cli.journal.run_journal: unknown journal subcommand")
 
@@ -381,59 +306,49 @@ def run_journal(cmd: Cmd, args) -> Result[None, str]:
 # =============================================================================
 
 def add_arguments(subparsers):
-    """Add history and journal management commands to argument parser."""
+    """Add history and journal replay commands to argument parser."""
 
     # History command
-    parser_history = subparsers.add_parser("history", help="show command history from journal")
+    parser_history = subparsers.add_parser("history", help="show command history")
+    parser_history.add_argument("journal_name", nargs="?", default=None,
+                               help="journal name (default: system history from tmp)")
     parser_history.add_argument("--limit", type=int, default=20, help="number of recent entries to show (default: 20)")
     parser_history.add_argument("--errors", action="store_true", help="show only error entries")
     parser_history.add_argument("--success", action="store_true", help="show only successful entries")
     parser_history.add_argument("--pattern", help="filter commands matching regex pattern")
     parser_history.set_defaults(func=run_history)
 
-    # Journal management commands
-    parser_journal = subparsers.add_parser("journal", help="manage journal recording")
+    # Journal replay command
+    parser_journal = subparsers.add_parser("journal", help="replay journal commands")
     journal_subparsers = parser_journal.add_subparsers(dest='journal_cmd')
 
     parser_replay = journal_subparsers.add_parser("replay", help="replay commands from journal")
+    parser_replay.add_argument("journal_name", nargs="?", default="default",
+                              help="journal name (default: default)")
     parser_replay.add_argument("targets", nargs="*", help="index specifications like '1:10' or '5,8,12'")
     parser_replay.set_defaults(func=run_journal)
-
-    parser_on = journal_subparsers.add_parser("on", help="enable journal recording")
-    parser_on.set_defaults(func=run_journal)
-
-    parser_off = journal_subparsers.add_parser("off", help="disable journal recording")
-    parser_off.set_defaults(func=run_journal)
-
-    parser_status = journal_subparsers.add_parser("status", help="show journal recording status")
-    parser_status.set_defaults(func=run_journal)
 
 
 # =============================================================================
 # HISTORY COMMAND IMPLEMENTATION
 # =============================================================================
 
-def should_journal_command(current_cmd: str) -> bool:
-    """Determine if a command should be journaled."""
-    # Commands that shouldn't be journaled (meta/inspection commands)
-    skip_commands = [
-        "config",   # Configuration management
-        "history",  # History inspection
-        "journal",  # All journal subcommands
-    ]
-
-    return not any(current_cmd.startswith(cmd) for cmd in skip_commands)
-
-
 def run_history(cmd: Cmd, args) -> Result[None, str]:
-    """Display command history from journal."""
+    """Display command history (from tmp or named journal)."""
 
     try:
         from edgar import config
-        journal_path = config.get_journal_path(args.workspace)
 
-        # Read journal entries
-        result = read_entries(journal_path)
+        # Determine source: system history (tmp) or named journal
+        if args.journal_name is None:
+            # Read from system history (tmp)
+            history_path = config.get_history_path()
+        else:
+            # Read from named journal in workspace
+            history_path = config.get_journal_path(args.workspace, args.journal_name)
+
+        # Read entries
+        result = read_entries(history_path)
         if is_not_ok(result):
             return result
 

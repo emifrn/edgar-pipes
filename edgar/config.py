@@ -142,14 +142,33 @@ def get_db_path(workspace: Path) -> Path:
     return workspace / "store.db"
 
 
-def get_journal_path(workspace: Path) -> Path:
-    """Get journal file path within workspace."""
-    return workspace / "journal" / "journal.jsonl"
+def get_journal_path(workspace: Path, journal_name: str = "default") -> Path:
+    """
+    Get journal file path within workspace.
+
+    Args:
+        workspace: Workspace directory
+        journal_name: Journal name (e.g., "default", "setup", "daily")
+                     All journals stored in workspace/journals/NAME.jsonl
+    """
+    return workspace / "journals" / f"{journal_name}.jsonl"
 
 
-def get_silence_path(workspace: Path) -> Path:
-    """Get journal silence flag path within workspace."""
-    return workspace / "journal" / "silence"
+def get_history_path() -> Path:
+    """
+    Get system-level history file path (ephemeral, in tmp).
+    Uses UID for multi-user safety.
+    """
+    import tempfile
+
+    # Prefer XDG_RUNTIME_DIR (user-specific, secure)
+    runtime_dir = os.environ.get('XDG_RUNTIME_DIR')
+    if runtime_dir:
+        return Path(runtime_dir) / 'edgar-pipes-history.jsonl'
+
+    # Fallback to tmp with UID for multi-user safety
+    uid = os.getuid()
+    return Path(tempfile.gettempdir()) / f'edgar-pipes-{uid}.jsonl'
 
 
 def get_user_agent(config: dict) -> str:

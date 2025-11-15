@@ -23,21 +23,23 @@ formatting, and journaling.
 
 Core execution flow:
 1. Build current command string from sys.argv
-2. Display journal status bar (if terminal and journalable)
-3. Read packet from stdin (if piped from previous command)
-4. Execute command function with Cmd pattern
-5. Handle result: error, no output, or data output
-6. Format output based on context (table/json/csv/packet)
-7. Journal successful and failed commands
+2. Read packet from stdin (if piped from previous command)
+3. Execute command function with Cmd pattern
+4. Handle result: error, no output, or data output
+5. Format output based on context (table/json/csv/packet)
+6. Write to system history (always, in tmp)
+7. Write to journal (if -j flag present)
 
 **add_arguments(parser)** - CLI interface definition
 
 Registers all subcommands from CLI modules and defines global options:
-- `--db FILE`: Database path override
+- `-w, --ws PATH`: Workspace directory
+- `-j, --journal [NAME]`: Record to journal (default or named)
 - `-d, --debug`: Show pipeline data to stderr
-- `-j, --json`: Force JSON output
-- `-t, --table`: Force table output
+- `--json`: Force JSON output
+- `--table`: Force table output
 - `--csv`: Force CSV output
+- `--gp`: Force gnuplot format output
 - `--theme THEME`: Table theme selection
 
 **get_output_format(args)** - Format detection
@@ -48,11 +50,11 @@ Determines output format from flags or automatic detection:
 
 ### Journaling integration
 
-Commands are journaled with full pipeline history:
-- Entry written on command completion (success or error)
-- Meta commands (config, history, journal) are not journaled
+Two-tier recording system:
+- **System history**: All commands written to `/tmp/edgar-pipes-{uid}.jsonl` (automatic, ephemeral)
+- **User journals**: Commands written to `workspace/journals/NAME.jsonl` (explicit with `-j` flag)
 - Journal entries include: index, status, command, optional error
-- Status bar shows current journal and recording state
+- No filtering - all commands recorded to history, only explicit ones to journals
 
 ### Error handling
 

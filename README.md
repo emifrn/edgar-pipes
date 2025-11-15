@@ -33,12 +33,12 @@ based on previously defined groups, e.g. 'Balance', 'Balance.Assets',
 
 ### Reproducible workflows
 
-The ep command comes with a journaling system that automatically tracks command
-sessions. The journaling system can be suspended, redirected to new journals,
-and replayed fully or partially via indexing syntax. Journals can be used as
-templates for new company analysis, as a compact backup system (storing
-commands instead of data), or they can be used as part of shareable company
-libraries
+The ep command includes an explicit journaling system for recording command
+sessions. Use the `-j` flag to record commands to journals. The journaling
+system supports named journals and can replay workflows fully or partially via
+indexing syntax. Journals can be used as templates for new company analysis, as
+a compact backup system (storing commands instead of data), or they can be used
+as part of shareable company libraries
 
 In short, edgar-pipes enables a progressive discovery workflow that allows
 users to:
@@ -177,12 +177,14 @@ nano ~/.config/edgar-pipes/config.toml
 
 edgar-pipes uses workspaces to organize your analysis. A workspace is a directory containing:
 - `store.db` - SQLite database with filings, roles, concepts, and facts
-- `journal/journal.jsonl` - Command history for reproducibility
+- `journals/` - Journal directory (optional, created with `-j` flag)
+  - `default.jsonl` - Default journal (created with `-j`)
+  - `setup.jsonl`, `daily.jsonl`, etc. - Named journals (created with `-j NAME`)
 
 ```bash
 # Create and use a workspace
 mkdir aapl && cd aapl
-ep probe filings -t AAPL  # Auto-creates store.db and journal/
+ep probe filings -t AAPL  # Auto-creates store.db
 
 # Or use explicit workspace flag
 ep -w aapl probe filings -t AAPL
@@ -325,36 +327,36 @@ ep update -t <TICKER> -g <GROUP> --force
 
 #### Journals
 
-edgar-pipes automatically tracks commands in each workspace's journal. This
-enables reproducing workflows, regenerating databases, and sharing analysis.
-Each workspace has its own `journal/journal.jsonl` file that records command
-history.
+edgar-pipes provides explicit journaling for recording workflows. Use the `-j`
+flag to record commands to journals (default or named). All commands are also
+automatically recorded to system history (ephemeral, in tmp) for reference.
 
 ```bash
-# View command history for current workspace
+# Record to default journal (journals/default.jsonl)
+ep -j probe filings -t AAPL
+ep -j default new group Balance      # Same as -j
+
+# Record to named journals (journals/NAME.jsonl)
+ep -j setup probe filings -t AAPL
+ep -j daily update -t AAPL --force
+
+# View system history (automatic, from tmp)
 ep history
 
-# View recent 10 entries
-ep history --limit 10
+# View named journal history
+ep history setup
+ep history daily --limit 10
 
-# Suspend journal recording
-ep journal off
-
-# Resume journal recording
-ep journal on
-
-# Check journal status
-ep journal status
-
-# Replay all commands from journal
+# Replay commands from default journal
 ep journal replay
 
-# Replay specific commands by index
-ep journal replay 5:10,13,15,18:22
-ep journal replay 1,5,8
+# Replay from named journal
+ep journal replay setup
+ep journal replay setup 5:10,13,15,18:22
+ep journal replay daily 1,5,8
 
 # Replay from different workspace
-ep -w ~/aapl journal replay
+ep -w ~/aapl journal replay setup
 ```
 
 #### Reports
@@ -411,8 +413,8 @@ examples, refer to each command help section, e.g. "ep delete -h".
 | `modify`  | Update patterns and manage group membership |
 | `delete`  | Remove data from database |
 | `config`  | Manage configuration settings |
-| `journal` | Track command history |
-| `history` | View command session history |
+| `journal` | Replay journal commands |
+| `history` | View command history (system or named journals) |
 
 ## Requirements
 

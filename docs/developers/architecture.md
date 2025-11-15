@@ -41,9 +41,10 @@ datasets. The command includes the following components:
    Provides transparent network/database abstraction to CLI commands. See
    [cache.md](modules/cache.md) for resolution logic.
 
-5. Journal component (`edgar/cli/journal.py`) - Automatic command tracking
-   with replay capability. Journals stored in JSONL format enable reproducible
-   workflows, templates, and shareable company libraries. See
+5. Journal component (`edgar/cli/journal.py`) - Explicit journal recording
+   (via `-j` flag) with replay capability. System history automatically tracked
+   in tmp. Journals stored in JSONL format enable reproducible workflows,
+   templates, and shareable company libraries. See
    [cli.md](modules/cli.md#journal-management) for journal system details.
 
 6. Pipeline orchestration (`edgar/pipeline.py`) - Packet envelope management

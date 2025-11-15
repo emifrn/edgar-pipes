@@ -72,17 +72,16 @@ Provides themed table rendering with color support:
 
 Themes include financial, minimal, grid, and nobox variants with light/dark modes.
 
-**journal.py** - Command history
+**journal.py** - Command history and replay
 
-Automatic command logging and replay functionality:
-- `write_entry()`: Log command execution
-- `read_entries()`: Read journal file
-- `journal_replay()`: Re-execute commands from history
-- `should_journal_command()`: Filter commands for logging
-- `get_status_bar()`: Display current journal info
+Explicit journal recording (via `-j` flag) with replay functionality:
+- `write_entry()`: Write command to journal or history
+- `read_entries()`: Read journal/history file
+- `journal_replay()`: Re-execute commands from journal
+- `run_history()`: Display command history (system or named journals)
 
-Journal files are stored in `~/.local/share/edgar-pipes/journals/` and can be
-replayed for reproducible workflows.
+System history automatically stored in `/tmp/edgar-pipes-{uid}.jsonl` (ephemeral).
+User journals stored in `workspace/journals/NAME.jsonl` (explicit with `-j` flag).
 
 ## Command patterns
 

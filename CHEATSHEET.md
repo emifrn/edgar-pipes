@@ -204,36 +204,44 @@ ep report -t TICKER -g Balance | ep calc \
 
 ## Journaling
 
-### Recording Control
+### Recording (Explicit)
 
 ```bash
-# Disable recording
-ep journal off
+# Record to default journal (journals/default.jsonl)
+ep -j probe filings -t AAPL
+ep -j default new group Balance      # Same as -j
 
-# Enable recording
-ep journal on
-
-# Check status
-ep journal status
+# Record to named journals (journals/NAME.jsonl)
+ep -j setup probe filings -t AAPL
+ep -j daily update -t AAPL --force
+ep -j experiment select concepts -t AAPL -p '(?i)cash'
 ```
 
 ### Replay
 
 ```bash
-# Replay entire journal
+# Replay default journal
 ep journal replay
 
+# Replay named journal
+ep journal replay setup
+ep journal replay daily
+
 # Replay specific entries
-ep journal replay 5 10 15          # Specific indices
-ep journal replay 1:50             # Range
-ep journal replay 1:10,20:30       # Multiple ranges
+ep journal replay setup 5 10 15    # Specific indices
+ep journal replay setup 1:50       # Range
+ep journal replay daily 1:10,20:30 # Multiple ranges
 ```
 
 ### History
 
 ```bash
-# View recent commands (from current workspace)
+# View system history (automatic, from tmp)
 ep history
+
+# View named journal history
+ep history setup
+ep history daily
 
 # Show more entries
 ep history --limit 50
@@ -460,8 +468,9 @@ ep config env
 # Workspace structure (created in current directory)
 workspace/
   ├── store.db              # SQLite database
-  └── journal/
-      └── journal.jsonl     # Command history
+  └── journals/
+      ├── default.jsonl     # Default journal (ep -j)
+      └── setup.jsonl       # Named journal (ep -j setup)
 ```
 
 ---

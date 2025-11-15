@@ -24,9 +24,9 @@ Introduce the **workspace** concept: a directory containing both database and jo
 ```
 workspace/
   ├── store.db              # SQLite database
-  └── journal/
-      ├── journal.jsonl     # Command history
-      └── silence           # Optional flag file
+  └── journals/             # Optional (created with -j flag)
+      ├── default.jsonl     # Default journal (ep -j)
+      └── setup.jsonl       # Named journals (ep -j NAME)
 ```
 
 ### Resolution Priority
@@ -98,7 +98,8 @@ ep --db /path/to/aapl.db probe filings -t aapl
 ```bash
 # Natural filesystem navigation
 mkdir aapl && cd aapl
-ep probe filings -t aapl  # Auto-creates store.db and journal/
+ep probe filings -t aapl  # Auto-creates store.db
+ep -j probe filings -t aapl  # Use -j to also create journal
 
 # Or explicit workspace
 ep -w aapl probe filings -t aapl
