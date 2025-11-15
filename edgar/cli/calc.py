@@ -8,6 +8,7 @@ Examples:
     edgar report -t aeo -g Balance | calc "Current ratio = Current assets / Current liabilities"
     edgar report -t aeo -g Balance | calc "Working capital = Current assets - Current liabilities"
     edgar report -t aeo -g Balance | calc "Debt to equity = Total liabilities / Stockholders equity"
+    edgar report -t bke -g Balance | calc -z "Cash = Cash.Unrestricted + Cash.Total"
 """
 
 import re
@@ -32,6 +33,11 @@ def add_arguments(subparsers):
         nargs="+",
         metavar="EXPR",
         help='expressions like "New column = Column A + Column B"'
+    )
+    parser_calc.add_argument(
+        "-z", "--null-as-zero",
+        action="store_true",
+        help="treat NULL values as 0 in arithmetic operations"
     )
     parser_calc.set_defaults(func=run)
 
@@ -66,7 +72,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         new_row = dict(row)  # Copy original row
 
         for target_col, expression in parsed_expressions:
-            result = _evaluate_expression(expression, new_row)
+            result = _evaluate_expression(expression, new_row, null_as_zero=args.null_as_zero)
             if is_not_ok(result):
                 return err(f"calc: {result[1]} in row {row}")
 
@@ -116,13 +122,14 @@ def _parse_expression(expr_str: str) -> Result[tuple[str, str], str]:
         return ok((expression, expression))
 
 
-def _evaluate_expression(expression: str, row: dict[str, Any]) -> Result[float | int | None, str]:
+def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: bool = False) -> Result[float | int | None, str]:
     """
     Safely evaluate arithmetic expression with column references.
 
     Args:
         expression: String like "Current assets / Current liabilities"
         row: Data row with column values
+        null_as_zero: If True, treat NULL values as 0 in arithmetic
 
     Returns:
         ok(value) - Computed value
@@ -189,13 +196,20 @@ def _evaluate_expression(expression: str, row: dict[str, Any]) -> Result[float |
     }
     namespace.update(safe_functions)
 
-    # Check if any referenced column is missing (None value)
-    # This would cause issues in arithmetic
-    for var_name, value in namespace.items():
-        if var_name in safe_functions:
-            continue  # Skip function names
-        if value is None:
-            return ok(None)  # Return None if any input is None
+    # Handle NULL values
+    if null_as_zero:
+        # Treat NULL as 0 in arithmetic
+        for var_name in list(namespace.keys()):
+            if var_name not in safe_functions and namespace[var_name] is None:
+                namespace[var_name] = 0
+    else:
+        # Check if any referenced column is missing (None value)
+        # This would cause issues in arithmetic
+        for var_name, value in namespace.items():
+            if var_name in safe_functions:
+                continue  # Skip function names
+            if value is None:
+                return ok(None)  # Return None if any input is None
 
     # Evaluate expression
     try:
