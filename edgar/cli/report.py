@@ -42,6 +42,12 @@ def add_arguments(subparsers):
     mode_group.add_argument("-f", "--flow", action="store_true",
                            help="show only flow/period measurements (income statement items)")
 
+    # Scaling option
+    parser_report.add_argument("-s", "--scale",
+                              choices=["auto", "B", "M", "K"],
+                              default="auto",
+                              help="scale numeric values: auto (detect, default), B (billions), M (millions), K (thousands)")
+
     parser_report.set_defaults(func=run)
 
 
@@ -137,6 +143,10 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         # Filter columns if requested
         if args.cols:
             pivoted = _filter_columns(pivoted, args.cols)
+
+        # Apply scaling if requested
+        if args.scale:
+            pivoted = _apply_scale(pivoted, args.scale)
 
         conn.close()
         return ok({"name": "report", "data": pivoted})
@@ -496,3 +506,87 @@ def _filter_columns(pivoted: list[dict[str, Any]], cols: list[str]) -> list[dict
         filtered.append(filtered_row)
 
     return filtered
+
+
+def _detect_scale(pivoted: list[dict[str, Any]]) -> str:
+    """
+    Auto-detect appropriate scale based on maximum absolute value in numeric columns.
+
+    Returns:
+        "B" for billions (max >= 1e9)
+        "M" for millions (max >= 1e6)
+        "K" for thousands (max >= 1e3)
+        "" for no scaling (max < 1e3)
+    """
+    metadata_cols = {"fiscal_year", "fiscal_period", "mode"}
+    max_value = 0
+
+    for row in pivoted:
+        for key, value in row.items():
+            if key in metadata_cols:
+                continue
+            if isinstance(value, (int, float)) and value is not None:
+                max_value = max(max_value, abs(value))
+
+    if max_value >= 1e9:
+        return "B"
+    elif max_value >= 1e6:
+        return "M"
+    elif max_value >= 1e3:
+        return "K"
+    else:
+        return ""
+
+
+def _apply_scale(pivoted: list[dict[str, Any]], scale_choice: str) -> list[dict[str, Any]]:
+    """
+    Apply scaling to all numeric columns and add scale column.
+
+    Args:
+        pivoted: Report data rows
+        scale_choice: "auto", "B", "M", or "K"
+
+    Returns:
+        Scaled data with scale column added
+    """
+    # Determine actual scale to use
+    if scale_choice == "auto":
+        scale = _detect_scale(pivoted)
+    else:
+        scale = scale_choice
+
+    # Determine scale factor
+    scale_factors = {
+        "B": 1e9,
+        "M": 1e6,
+        "K": 1e3,
+        "": 1
+    }
+    factor = scale_factors.get(scale, 1)
+
+    # Metadata columns that should not be scaled
+    metadata_cols = {"fiscal_year", "fiscal_period", "mode"}
+
+    # Apply scaling to all rows
+    scaled = []
+    for row in pivoted:
+        scaled_row = {}
+
+        # Add metadata columns in order with renamed headers: FY, Period, Mode, Scale
+        scaled_row["FY"] = row.get("fiscal_year")
+        scaled_row["Period"] = row.get("fiscal_period")
+        scaled_row["Mode"] = row.get("mode")
+        scaled_row["Scale"] = scale
+
+        # Add remaining columns (scaled numeric values)
+        for key, value in row.items():
+            if key in metadata_cols:
+                continue  # Already added
+            elif isinstance(value, (int, float)) and value is not None:
+                scaled_row[key] = value / factor
+            else:
+                scaled_row[key] = value
+
+        scaled.append(scaled_row)
+
+    return scaled
