@@ -20,10 +20,10 @@ def add_arguments(parser):
 
     # Add mutually exclusive format options as global flags
     format_group = parser.add_mutually_exclusive_group()
-    format_group.add_argument("-j", "--json", action="store_true", help="output in JSON format (JSONL)")
-    format_group.add_argument("-t", "--table", action="store_true", help="output in table format")
+    format_group.add_argument("--json", action="store_true", help="output in JSON format (JSONL)")
+    format_group.add_argument("--table", action="store_true", help="output in table format")
     format_group.add_argument("--csv", action="store_true", help="output in CSV format")
-    format_group.add_argument("-g", "--gp", action="store_true", help="output in gnuplot format (TSV with comment headers)")
+    format_group.add_argument("--gp", action="store_true", help="output in gnuplot format (TSV with comment headers)")
     
     parser.add_argument("--theme", metavar="X", 
                         choices=["default", "financial", "financial-light", 
