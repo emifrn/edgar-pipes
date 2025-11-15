@@ -243,7 +243,7 @@ Examples:
   ep select patterns -t AEO -g Balance
   ep new group "Current Assets" --from Balance -t AEO --uid 1 2 3
   ep select concepts -t AAPL | ep delete -y
-  ep -w aapl select filings | select roles -g Balance | probe concepts
+  ep -w aapl select filings | ep select roles -g Balance | ep probe concepts
 
 Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawDescriptionHelpFormatter)
 
