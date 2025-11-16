@@ -131,6 +131,14 @@ facts matching that group's role and concept patterns for the given ticker.
 **New to edgar-pipes?** Check out [CHEATSHEET.md](CHEATSHEET.md) for a quick
 command reference with common workflows and patterns.
 
+**Working with AI agents?** The `ep` command's composable pipeline architecture
+mechanisms make it well-suited for AI-driven financial analysis. AI agents can
+systematically discover, validate, and extract financial data using the
+progressive discovery workflow. See
+[docs/agents/AI_AGENT_GUIDE.md](docs/agents/AI_AGENT_GUIDE.md) for
+AI Agent guidance, validation strategies, and best practices for accurate
+financial data extraction.
+
 ### Installation
 
 ```bash
@@ -366,16 +374,16 @@ tabular form using the "rich" library when presented to the terminal. Other
 formats are also supported such as --csv and --json.
 
 ```bash
-$ ep report -t AAPL -g Operations.Revenue --yearly
+$ ep report -t BKE -g Balance.Assets.Current --yearly
 
-fiscal_year  fiscal_period  Revenue      Cost of sales  Gross profit
-2020         FY             274515000000 169559000000   104956000000
-2021         FY             365817000000 212981000000   152836000000
-2022         FY             394328000000 223546000000   170782000000
-2023         FY             383285000000 214137000000   169148000000
+FY    Period  Scale  Cash     Inventory  Investments.Current  Prepaids.Current  Receivables.Current
+2021  FY      M      253.97   102.095    12.926               10.128            12.087
+2022  FY      M      252.077  125.134    20.997               12.48             12.648
+2023  FY      M      268.213  126.29     22.21                18.846            8.697
+2024  FY      M      266.929  120.789    23.801               20.932            6.758
 
 # Export multiple companies to CSV
-ep --csv report -t AAPL -g Balance --yearly > apple.csv
+ep --csv report -t BKE -g Balance --yearly > bke.csv
 ep --csv report -t MSFT -g Balance --yearly > microsoft.csv
 ```
 
