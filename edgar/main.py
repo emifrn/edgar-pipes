@@ -25,7 +25,7 @@ def add_arguments(parser):
     format_group.add_argument("--json", action="store_true", help="output in JSON format (JSONL)")
     format_group.add_argument("--table", action="store_true", help="output in table format")
     format_group.add_argument("--csv", action="store_true", help="output in CSV format")
-    format_group.add_argument("--gp", action="store_true", help="output in gnuplot format (TSV with comment headers)")
+    format_group.add_argument("--tsv", action="store_true", help="output in TSV format (gnuplot native format)")
     
     parser.add_argument("--theme", metavar="X", 
                         choices=["default", "financial", "financial-light", 
