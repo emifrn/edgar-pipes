@@ -64,8 +64,8 @@ def get_output_format(args):
         return 'table'
     elif args.csv:
         return 'csv'
-    elif args.gp:
-        return 'gp'
+    elif args.tsv:
+        return 'tsv'
     else:
         # Automatic detection
         return pipeline.output_format()
@@ -171,8 +171,8 @@ def cli_main(args):
                     print(cli.format.as_json(result[1]["data"]))
                 elif output_format == 'csv':
                     print(cli.format.as_csv(result[1]["data"]))
-                elif output_format == 'gp':
-                    print(cli.format.as_gp(result[1]["data"]))
+                elif output_format == 'tsv':
+                    print(cli.format.as_tsv(result[1]["data"]))
                 else:  # table or default
                     theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))

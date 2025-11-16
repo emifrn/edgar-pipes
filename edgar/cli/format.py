@@ -55,7 +55,7 @@ def as_json(data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def as_gp(data: list[dict]) -> str:
+def as_tsv(data: list[dict]) -> str:
     """Format data as gnuplot-friendly TSV with comment header."""
     if not data:
         return ""
