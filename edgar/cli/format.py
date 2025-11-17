@@ -72,8 +72,8 @@ def as_tsv(data: list[dict]) -> str:
     # Build output lines
     lines = []
 
-    # Add comment header line
-    lines.append("# " + "\t".join(headers))
+    # Add header line
+    lines.append("\t".join(headers))
 
     # Add data rows
     for record in data:
