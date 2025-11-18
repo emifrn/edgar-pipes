@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import json
+import argparse
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
@@ -360,7 +361,15 @@ def add_arguments(subparsers):
     # History command - simplified, system-wide only
     parser_history = subparsers.add_parser(
         "history",
-        help="show system-wide command history (ephemeral, from /tmp)"
+        help="show system-wide command history (ephemeral, from /tmp)",
+        epilog='''
+Location:
+  History is always stored in /tmp (or XDG_RUNTIME_DIR if set).
+  Path: /tmp/edgar-pipes-{uid}.jsonl
+
+  Note: Not affected by workspace or environment variables.
+        For workspace-specific persistent logs, use 'ep journal'.''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser_history.add_argument("-e", "--errors", action="store_true",
                                help="show only error entries")
@@ -375,7 +384,26 @@ def add_arguments(subparsers):
     # Journal command - view or replay workspace journals
     parser_journal = subparsers.add_parser(
         "journal",
-        help="view or replay workspace journals"
+        help="view or replay workspace journals",
+        epilog='''
+Location resolution (priority order):
+  Workspace:
+    1. --ws PATH flag (explicit workspace directory)
+    2. Pipeline context (when piped from previous command)
+    3. Current directory (default)
+
+  Journal files:
+    1. EDGAR_PIPES_JOURNALS_DIR env var (overrides workspace)
+    2. {workspace}/journals/ (default)
+
+  Final path: {journals_dir}/{journal_name}.jsonl
+
+Examples:
+  ep journal                      # View default journal in current workspace
+  ep journal setup                # View setup journal
+  ep -w aapl journal              # View journal in aapl workspace
+  ep journal replay setup 1:10    # Replay commands 1-10 from setup journal''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Journal supports both view mode (default) and replay subcommand
