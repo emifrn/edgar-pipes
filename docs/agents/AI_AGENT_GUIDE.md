@@ -78,6 +78,8 @@ ep select concepts -p '(?i)cash' -c tag -u
 ep select concepts -p 'PATTERN' -m
 ep report -t TICKER -g GroupName --yearly
 ep stats concepts -t TICKER -g GroupName
+ep history                          # View system history
+ep journal                          # View journals
 ```
 
 **Critical journal practices:**

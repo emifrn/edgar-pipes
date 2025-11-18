@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-11-17
+
+### ⚠️ Breaking Changes
+
+**Command Interface Cleanup**
+- `ep history` now ONLY shows system-wide ephemeral log from `/tmp` (no arguments accepted)
+- Removed `ep history <journal_name>` - use `ep journal <name>` instead to view workspace journals
+- Migration: Replace `ep history setup` with `ep journal setup`
+
+### Added
+
+**Workspace Path Overrides**
+- `EDGAR_PIPES_DB_PATH` environment variable to override database location
+- `EDGAR_PIPES_JOURNALS_DIR` environment variable to override journals directory
+- Supports custom workspace layouts (e.g., separate src/journals from build/store.db)
+- Enables build system paradigm: journals as source, database as build artifact
+
+**Journal Viewing**
+- `ep journal` command now views default journal (in addition to replay subcommand)
+- `ep journal <name>` views named journals (setup, daily, etc.)
+- Supports same filters as history: `--limit`, `--errors`, `--success`, `--pattern`
+
+### Changed
+
+**Clearer Command Separation**
+- `ep history`: System-wide, ephemeral, cross-workspace command log
+- `ep journal`: Workspace-specific, persistent journals (view or replay)
+- Improved help text and documentation to clarify distinction
+
+### Migration Guide
+
+**From v0.2.0 to v0.2.1:**
+
+```bash
+# Old command
+ep history setup
+
+# New command
+ep journal setup
+
+# Custom workspace layout (new capability)
+export EDGAR_PIPES_DB_PATH=build/store.db
+export EDGAR_PIPES_JOURNALS_DIR=src/journals
+ep -j setup probe filings -t AAPL
+```
+
 ## [0.2.0] - 2025-11-15
 
 ### ⚠️ Breaking Changes

@@ -67,7 +67,7 @@ ep report -t TICKER -g Balance --quarterly
 
 ## Discovery & Exploration
 
-### Probe Commands (fetch and cache data from SEC)
+### Probe commands (fetch and cache data from SEC)
 
 ```bash
 # Discover available filings for a company
@@ -80,7 +80,7 @@ ep select filings -t TICKER | ep probe roles
 ep select filings -t TICKER | ep select roles -g GROUP | ep probe concepts
 ```
 
-### Select Commands (query local database)
+### Select commands (query local database)
 
 ```bash
 # Find entities by ticker
@@ -110,7 +110,7 @@ ep select patterns -t TICKER --type roles
 
 ## Creating Groups & Patterns
 
-### Simple Group
+### Simple group
 
 ```bash
 # Create empty group
@@ -127,7 +127,7 @@ ep add role -g GroupName -t TICKER -n role_name
 ep add concept -g GroupName -t TICKER -u 1
 ```
 
-### Derived Group (inherit from parent)
+### Derived group (inherit from parent)
 
 ```bash
 # Create subgroup with filtered concepts
@@ -139,9 +139,9 @@ ep new group Operations.Revenue --from Operations -t TICKER --pattern '(?i).*rev
 
 ---
 
-## Updating & Reporting
+## Updating & reporting
 
-### Update Database
+### Update database
 
 ```bash
 # Update all groups for a ticker
@@ -154,7 +154,7 @@ ep update -t TICKER -g GROUP
 ep update -t TICKER --force
 ```
 
-### Generate Reports
+### Generate reports
 
 ```bash
 # Basic report
@@ -178,7 +178,7 @@ ep report -t TICKER -g GROUP --quarterly --csv > output.csv
 
 ---
 
-## Analysis & Calculations
+## Analysis & calculations
 
 ### Statistics
 
@@ -235,32 +235,29 @@ ep journal replay setup 1:50       # Range
 ep journal replay daily 1:10,20:30 # Multiple ranges
 ```
 
-### History
+### View History and Journals
 
 ```bash
-# View system history (automatic, from tmp)
+# View system history (automatic, from /tmp, cross-workspace)
 ep history
-
-# View named journal history
-ep history setup
-ep history daily
-
-# Show more entries
 ep history --limit 50
-
-# Filter by status
 ep history --errors                # Only failed commands
 ep history --success               # Only successful commands
-
-# Filter by pattern
 ep history --pattern 'probe'       # Commands containing "probe"
+
+# View workspace journals
+ep journal                         # View default journal
+ep journal setup                   # View setup journal
+ep journal daily                   # View daily journal
+ep journal setup --limit 10        # Last 10 entries
+ep journal setup --errors          # Failed entries only
 ```
 
 ---
 
-## Modifying Patterns
+## Modifying patterns
 
-### Preview Changes (default)
+### Preview changes (default)
 
 ```bash
 # Modify concept pattern (preview only)
@@ -273,7 +270,7 @@ ep modify role -n role_name -t TICKER --pattern 'NewRolePattern'
 ep modify group GroupName --rename OldName NewName
 ```
 
-### Execute Changes
+### Execute changes
 
 ```bash
 # Execute with -y flag
@@ -282,7 +279,7 @@ ep modify role -n role_name -t TICKER --new-name new_role_name -y
 ep modify group GroupName --rename OldName NewName -y
 ```
 
-### Remove Patterns from Group
+### Remove patterns from group
 
 ```bash
 # Remove concept patterns (preview only)
@@ -300,7 +297,7 @@ ep modify group GroupName --remove-role -t TICKER -n role_name -y
 
 ---
 
-## Deleting Data
+## Deleting data
 
 Preview mode (dry-run) by default:
 
@@ -320,7 +317,7 @@ ep select groups -n OldGroup | ep delete -y
 
 ---
 
-## Pipeline Examples
+## Pipeline examples
 
 Combine commands using pipes:
 
@@ -344,7 +341,7 @@ ep report -t TICKER -g Balance --quarterly | \
 
 ---
 
-## Column Selection & Sorting
+## Column selection & sorting
 
 Specify columns with optional sort direction:
 
@@ -364,9 +361,9 @@ ep select concepts -t TICKER -c tag+ -u
 
 ---
 
-## Tips & Tricks
+## Tips & tricks
 
-### Pattern Development
+### Pattern development
 
 ```bash
 # Test pattern coverage before creating
@@ -396,6 +393,18 @@ ep -w aapl probe filings -t aapl
 ep -w aapl probe filings -t aapl | ep select filings | ep select roles
 ```
 
+### Advanced: Custom workspace layout
+
+```bash
+# Separate source from build artifacts
+export EDGAR_PIPES_DB_PATH=build/store.db
+export EDGAR_PIPES_JOURNALS_DIR=src/journals
+
+ep -j setup probe filings -t AAPL        # Journal → src/journals/setup.jsonl
+ep update -t AAPL                         # Database → build/store.db
+ep journal replay setup                   # Rebuild from journals
+```
+
 ### Debugging
 
 ```bash
@@ -405,9 +414,9 @@ ep -d select filings -t TICKER | ep -d select roles -g Balance
 
 ---
 
-## Common Workflows
+## Common workflows
 
-### Adding New Concepts to Existing Group
+### Adding new concepts to existing group
 
 ```bash
 # 1. Find candidate tags
@@ -423,7 +432,7 @@ ep add concept -g GROUP -t TICKER -u 99
 ep update -t TICKER -g GROUP
 ```
 
-### Creating Financial Statement Groups
+### Creating financial statement groups
 
 ```bash
 # Balance sheet
@@ -442,7 +451,7 @@ ep new role -t TICKER -n cashflow -p 'Statement.*CashFlows$'
 ep add role -g CashFlow -t TICKER -n cashflow
 ```
 
-### Quarterly Analysis
+### Quarterly analysis
 
 ```bash
 # Compare quarterly performance

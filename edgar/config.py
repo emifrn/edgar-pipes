@@ -15,7 +15,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     "edgar": {
-        "user_agent": "edgar-pipes/0.1.0",  # Fallback (not ideal, prompt user)
+        "user_agent": "edgar-pipes/0.2.1",  # Fallback (not ideal, prompt user)
     },
     "output": {
         "theme": "nobox-minimal",
@@ -35,6 +35,10 @@ def load_config() -> dict[str, Any]:
     1. Environment variables (highest)
     2. Config file (~/.config/edgar-pipes/config.toml)
     3. Built-in defaults (lowest)
+
+    Workspace path overrides (applied after workspace resolution):
+    - EDGAR_PIPES_DB_PATH: Override database location
+    - EDGAR_PIPES_JOURNALS_DIR: Override journals directory
     """
     # Start with defaults
     config = {
@@ -138,20 +142,43 @@ def get_workspace_path(workspace_arg: str | None, context_workspace: str | None)
 
 
 def get_db_path(workspace: Path) -> Path:
-    """Get database file path within workspace."""
+    """
+    Get database file path.
+
+    Priority:
+    1. EDGAR_PIPES_DB_PATH environment variable (absolute or relative to CWD)
+    2. {workspace}/store.db (default)
+
+    Returns absolute path.
+    """
+    env_path = os.getenv('EDGAR_PIPES_DB_PATH')
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
     return workspace / "store.db"
 
 
 def get_journal_path(workspace: Path, journal_name: str = "default") -> Path:
     """
-    Get journal file path within workspace.
+    Get journal file path for workspace-specific journals.
 
     Args:
-        workspace: Workspace directory
+        workspace: Workspace directory (used if no env override)
         journal_name: Journal name (e.g., "default", "setup", "daily")
-                     All journals stored in workspace/journals/NAME.jsonl
+
+    Priority:
+    1. EDGAR_PIPES_JOURNALS_DIR environment variable (absolute or relative to CWD)
+    2. {workspace}/journals/ (default)
+
+    Returns absolute path to journal file.
     """
-    return workspace / "journals" / f"{journal_name}.jsonl"
+    env_dir = os.getenv('EDGAR_PIPES_JOURNALS_DIR')
+    if env_dir:
+        journals_dir = Path(env_dir).expanduser().resolve()
+    else:
+        journals_dir = workspace / "journals"
+
+    return journals_dir / f"{journal_name}.jsonl"
 
 
 def get_history_path() -> Path:

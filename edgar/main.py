@@ -209,7 +209,7 @@ def main():
     cfg = config.load_config()
 
     # Check if user_agent is still default (first run - needs setup)
-    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.1.0":
+    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.2.1":
         config.init_config_interactive()
         cfg = config.load_config()
 
@@ -226,6 +226,8 @@ Available themes:
 Environment variables:
   EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
   EDGAR_PIPES_THEME         Default table theme
+  EDGAR_PIPES_DB_PATH       Override database location (absolute or relative to CWD)
+  EDGAR_PIPES_JOURNALS_DIR  Override journals directory (absolute or relative to CWD)
 
 Configuration:
   Config file: ~/.config/edgar-pipes/config.toml
@@ -235,15 +237,28 @@ Configuration:
 Workspace:
   Workspace contains store.db and journals/ directory
   Default: current directory
-  Override: -w PATH or --ws PATH
+  Override workspace: -w PATH or --ws PATH
+  Override paths: EDGAR_PIPES_DB_PATH and EDGAR_PIPES_JOURNALS_DIR
 
 Examples:
+  # Standard workspace model
   mkdir aapl && cd aapl
   ep probe filings -t AAPL --force
   ep select patterns -t AEO -g Balance
   ep new group "Current Assets" --from Balance -t AEO --uid 1 2 3
   ep select concepts -t AAPL | ep delete -y
   ep -w aapl select filings | ep select roles -g Balance | ep probe concepts
+
+  # Custom layout with env vars
+  export EDGAR_PIPES_DB_PATH=build/store.db
+  export EDGAR_PIPES_JOURNALS_DIR=src/journals
+  ep -j setup probe filings -t AAPL
+
+  # View command history
+  ep history                    # System-wide history from /tmp
+  ep journal                    # View default journal
+  ep journal setup              # View setup journal
+  ep journal replay setup       # Replay setup journal
 
 Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawDescriptionHelpFormatter)
 

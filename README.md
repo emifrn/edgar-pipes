@@ -209,6 +209,25 @@ ep probe filings -t MSFT
 Workspaces let you maintain separate analyses for different companies or projects,
 with database and journal always kept together.
 
+#### Custom workspaces defined by environment variables
+
+For project-based workflows, you can override database and journal locations
+using environment variables:
+
+```bash
+# Separate source from build artifacts
+project/
+  src/journals/     # Version-controlled journals (source)
+  build/store.db    # Generated database (build artifact)
+  output/           # Reports and exports
+
+export EDGAR_PIPES_DB_PATH=build/store.db
+export EDGAR_PIPES_JOURNALS_DIR=src/journals
+
+ep -j setup probe filings -t AAPL
+ep journal replay setup  # Rebuilds database from journals
+```
+
 ### Workflows
 
 #### New company setup
@@ -348,18 +367,20 @@ ep -j default new group Balance      # Same as -j
 ep -j setup probe filings -t AAPL
 ep -j daily update -t AAPL --force
 
-# View system history (automatic, from tmp)
+# View system history (automatic, from /tmp, cross-workspace)
 ep history
+ep history --limit 50
+ep history --errors
+ep history --pattern "probe.*AAPL"
 
-# View named journal history
-ep history setup
-ep history daily --limit 10
+# View workspace journals
+ep journal                    # View default journal
+ep journal setup              # View setup journal
+ep journal daily --limit 10   # Last 10 entries from daily journal
 
-# Replay commands from default journal
-ep journal replay
-
-# Replay from named journal
-ep journal replay setup
+# Replay commands from journals
+ep journal replay             # Replay default journal
+ep journal replay setup       # Replay setup journal
 ep journal replay setup 5:10,13,15,18:22
 ep journal replay daily 1,5,8
 
@@ -421,8 +442,8 @@ examples, refer to each command help section, e.g. "ep delete -h".
 | `modify`  | Update patterns and manage group membership |
 | `delete`  | Remove data from database |
 | `config`  | Manage configuration settings |
-| `journal` | Replay journal commands |
-| `history` | View command history (system or named journals) |
+| `journal` | View or replay workspace journals |
+| `history` | View system-wide command history (ephemeral, from /tmp) |
 
 ## Requirements
 
@@ -437,21 +458,9 @@ is not supported.
 
 This has been a solo project until now, and contributions are welcome! The
 Author is looking for interested Community members to engage in the discussion
-of new ideas.
-
-**Especially valuable:**
-
-- **Design feedback** - Challenge assumptions, suggest architectural improvements
-- **Ideas and use cases** - Share how you'd want to use this tool, what's missing
-- **Journal library** - Share journals for different companies/industries
-- **Validation** - Cross-check data against known sources
-- **Documentation** - Tutorials, examples, use cases
-- **Debugging** - Fix bugs, edge cases, testing
-- **Features** - New commands, output formats, analyses
-
-If you see something that could be done better, please share your insight. Open
-an issue to discuss ideas, or submit a pull request. Fresh perspectives are
-invaluable.
+of new ideas. If you see something that could be done better, please share your
+insight. Open an issue to discuss ideas, or submit a pull request. Fresh
+perspectives are invaluable.
 
 ## Known Limitations
 
@@ -503,7 +512,9 @@ Comprehensive documentation for contributors and developers:
 - **[Design Decisions](docs/developers/decisions/)** - Rationale behind key architectural choices
 - **[Examples](docs/examples/)** - Sample workflows and journal files
 
-Journals are stored in JSONL format for easy parsing and analysis. See [docs/examples/journal-aeo.jsonl](docs/examples/journal-aeo.jsonl) for a complete workflow example.
+Journals are stored in JSONL format for easy parsing and analysis. See
+[docs/examples/journal-aeo.jsonl](docs/examples/journal-aeo.jsonl) for a
+complete workflow example.
 
 ## Support
 
@@ -513,5 +524,5 @@ Journals are stored in JSONL format for easy parsing and analysis. See [docs/exa
 
 ---
 
-**Note**: This is alpha software (v0.1.0). Expect rough edges. Feedback and
+**Note**: This is alpha software. Expect rough edges. Feedback and
 contributions welcome!

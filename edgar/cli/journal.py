@@ -1,7 +1,9 @@
 """
-CLI: journal
+CLI: journal and history
 
-Unified journaling module providing journal I/O, history display, and journal management.
+Provides two separate command systems:
+- history: System-wide ephemeral command log (from /tmp)
+- journal: Workspace-specific persistent journals (view and replay)
 """
 
 import os
@@ -289,16 +291,63 @@ def execute_entries(entries: list[dict]) -> Result[None, str]:
 
 
 # =============================================================================
-# JOURNAL MANAGEMENT COMMAND HANDLER
+# JOURNAL COMMAND HANDLERS
 # =============================================================================
 
-def run_journal(cmd: Cmd, args) -> Result[None, str]:
+def run_journal_view(cmd: Cmd, args) -> Result[None, str]:
+    """Display workspace journal entries."""
+    # If 'replay' subcommand was used, delegate to replay handler
+    if hasattr(args, 'journal_cmd') and args.journal_cmd == 'replay':
+        return run_journal_replay(cmd, args)
+
+    try:
+        from edgar import config
+
+        # Read from workspace journal
+        journal_path = config.get_journal_path(args.workspace, args.journal_name)
+
+        # Read entries
+        result = read_entries(journal_path)
+        if is_not_ok(result):
+            return result
+
+        entries = result[1]
+        if not entries:
+            print(f"No entries found in journal '{args.journal_name}'.", file=sys.stderr)
+            return ok(None)
+
+        # Parse and filter entries
+        parsed_entries = []
+        for entry in entries:
+            parsed = parse_journal_entry(entry)
+            if parsed:
+                parsed_entries.append(parsed)
+
+        # Apply filters
+        filtered = apply_filters(parsed_entries, args)
+
+        # Apply limit
+        if args.limit and len(filtered) > args.limit:
+            filtered = filtered[-args.limit:]
+
+        # Display results
+        if filtered:
+            print(f"Journal: {args.journal_name}", file=sys.stderr)
+            display_entries(filtered)
+        else:
+            print("No matching entries found.", file=sys.stderr)
+
+        return ok(None)
+
+    except Exception as e:
+        return err(f"cli.journal.run_journal_view: {e}")
+
+
+def run_journal_replay(cmd: Cmd, args) -> Result[None, str]:
     """Handle journal replay command."""
-    if args.journal_cmd == 'replay':
-        journal_name = args.journal_name if hasattr(args, 'journal_name') else "default"
-        return journal_replay(args.workspace, journal_name, args.targets)
-    else:
-        return err("cli.journal.run_journal: unknown journal subcommand")
+    journal_name = args.journal_name if hasattr(args, 'journal_name') else "default"
+    targets = args.targets if hasattr(args, 'targets') else []
+    return journal_replay(args.workspace, journal_name, targets)
 
 
 # =============================================================================
@@ -306,27 +355,53 @@ def run_journal(cmd: Cmd, args) -> Result[None, str]:
 # =============================================================================
 
 def add_arguments(subparsers):
-    """Add history and journal replay commands to argument parser."""
+    """Add history and journal commands to argument parser."""
 
-    # History command
-    parser_history = subparsers.add_parser("history", help="show command history")
-    parser_history.add_argument("journal_name", nargs="?", default=None,
-                               help="journal name (default: system history from tmp)")
-    parser_history.add_argument("--limit", type=int, default=20, help="number of recent entries to show (default: 20)")
-    parser_history.add_argument("--errors", action="store_true", help="show only error entries")
-    parser_history.add_argument("--success", action="store_true", help="show only successful entries")
-    parser_history.add_argument("--pattern", help="filter commands matching regex pattern")
+    # History command - simplified, system-wide only
+    parser_history = subparsers.add_parser(
+        "history",
+        help="show system-wide command history (ephemeral, from /tmp)"
+    )
+    parser_history.add_argument("-e", "--errors", action="store_true",
+                               help="show only error entries")
+    parser_history.add_argument("-s", "--success", action="store_true",
+                               help="show only successful entries")
+    parser_history.add_argument("-p", "--pattern", metavar="REXP",
+                               help="filter commands matching regex pattern")
+    parser_history.add_argument("-l", "--limit", metavar="N", type=int, default=20,
+                               help="number of recent entries to show (default: 20)")
     parser_history.set_defaults(func=run_history)
 
-    # Journal replay command
-    parser_journal = subparsers.add_parser("journal", help="replay journal commands")
-    journal_subparsers = parser_journal.add_subparsers(dest='journal_cmd')
+    # Journal command - view or replay workspace journals
+    parser_journal = subparsers.add_parser(
+        "journal",
+        help="view or replay workspace journals"
+    )
 
-    parser_replay = journal_subparsers.add_parser("replay", help="replay commands from journal")
+    # Journal supports both view mode (default) and replay subcommand
+    parser_journal.add_argument("journal_name", nargs="?", default="default",
+                               help="journal name to view (default: default)")
+    parser_journal.add_argument("-e", "--errors", action="store_true",
+                               help="show only error entries")
+    parser_journal.add_argument("-s", "--success", action="store_true",
+                               help="show only successful entries")
+    parser_journal.add_argument("-p", "--pattern", metavar="REXP",
+                               help="filter commands matching regex pattern")
+    parser_journal.add_argument("-l", "--limit", metavar="N", type=int, default=20,
+                               help="number of recent entries to show (default: 20)")
+    parser_journal.set_defaults(func=run_journal_view)
+
+    # Replay subcommand
+    journal_subparsers = parser_journal.add_subparsers(dest='journal_cmd')
+    parser_replay = journal_subparsers.add_parser(
+        "replay",
+        help="replay commands from journal"
+    )
     parser_replay.add_argument("journal_name", nargs="?", default="default",
                               help="journal name (default: default)")
-    parser_replay.add_argument("targets", nargs="*", help="index specifications like '1:10' or '5,8,12'")
-    parser_replay.set_defaults(func=run_journal)
+    parser_replay.add_argument("targets", nargs="*",
+                              help="index specifications like '1:10' or '5,8,12'")
+    parser_replay.set_defaults(func=run_journal_replay)
 
 
 # =============================================================================
@@ -334,18 +409,12 @@ def add_arguments(subparsers):
 # =============================================================================
 
 def run_history(cmd: Cmd, args) -> Result[None, str]:
-    """Display command history (from tmp or named journal)."""
-
+    """Display system-wide command history (from /tmp only)."""
     try:
         from edgar import config
 
-        # Determine source: system history (tmp) or named journal
-        if args.journal_name is None:
-            # Read from system history (tmp)
-            history_path = config.get_history_path()
-        else:
-            # Read from named journal in workspace
-            history_path = config.get_journal_path(args.workspace, args.journal_name)
+        # Always read from system history (tmp)
+        history_path = config.get_history_path()
 
         # Read entries
         result = read_entries(history_path)
@@ -354,7 +423,7 @@ def run_history(cmd: Cmd, args) -> Result[None, str]:
 
         entries = result[1]
         if not entries:
-            print("No command history found.", file=sys.stderr)
+            print("No system command history found.", file=sys.stderr)
             return ok(None)
 
         # Parse and filter entries
