@@ -7,7 +7,6 @@ Quick reference for the most common edgar-pipes commands and patterns.
 Work with all commands:
 
 ```bash
--w, --ws PATH       # Workspace directory (default: current directory)
 -j, --journal [NAME] # Record command to journal (default or named)
 -d, --debug         # Print pipeline data to stderr
 --json              # Output as JSONL
@@ -382,27 +381,51 @@ ep select filings -t TICKER | ep select roles -g GROUP | ep select concepts -p '
 ### Workspaces
 
 ```bash
-# Create workspace and auto-detect
+# Create workspace directory
 mkdir aapl && cd aapl
-ep probe filings -t aapl
 
-# Use explicit workspace from anywhere
-ep -w aapl probe filings -t aapl
+# Create .ft.toml configuration
+cat > .ft.toml <<EOF
+[workspace]
+ticker = "AAPL"  # Optional default ticker
 
-# Workspace propagates through pipelines (only first command needs -w)
-ep -w aapl probe filings -t aapl | ep select filings | ep select roles
+[edgar-pipes]
+database = "store.db"
+journals = "journals"
+EOF
+
+# Start working - edgar-pipes finds .ft.toml automatically
+ep probe filings -t AAPL
+ep -j setup new group Balance
+
+# Workspace auto-discovery works from subdirectories
+cd data/
+ep report -t AAPL -g Balance  # Still finds ../. ft.toml
 ```
 
 ### Advanced: Custom workspace layout
 
 ```bash
-# Separate source from build artifacts
-export EDGAR_PIPES_DB_PATH=build/store.db
-export EDGAR_PIPES_JOURNALS=src/journals
+# Build system paradigm: separate source/build/output
+mkdir company && cd company
 
-ep -j setup probe filings -t AAPL        # Journal → src/journals/setup.jsonl
-ep update -t AAPL                         # Database → build/store.db
-ep journal replay setup                   # Rebuild from journals
+# Create .ft.toml with custom paths
+cat > .ft.toml <<EOF
+[workspace]
+ticker = "AAPL"
+name = "Apple Inc."
+
+[edgar-pipes]
+database = "db/edgar.db"      # Paths relative to .ft.toml
+journals = "src/journals"
+EOF
+
+# Create directory structure
+mkdir -p src/journals db build output
+
+# Journal replay builds database from source
+ep journal replay setup       # Reads src/journals/setup.jsonl
+                              # Writes to db/edgar.db
 ```
 
 ### Debugging
@@ -470,15 +493,14 @@ ep report -t TICKER -g Operations --quarterly | \
 # View current configuration and workspace info
 ep config show
 
-# View environment variables
-ep config env
-
-# Configuration file location
+# User configuration file location (identity, theme)
 ~/.config/edgar-pipes/config.toml
 
-# Workspace structure (created in current directory)
+# Workspace configuration (.ft.toml - auto-discovered)
+# edgar-pipes walks up directory tree to find this file
 workspace/
-  ├── store.db              # SQLite database
+  ├── .ft.toml              # Workspace configuration
+  ├── store.db              # SQLite database (path from .ft.toml)
   └── journals/
       ├── default.jsonl     # Default journal (ep -j)
       └── setup.jsonl       # Named journal (ep -j setup)
