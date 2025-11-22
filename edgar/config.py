@@ -1,8 +1,8 @@
 """Configuration management for edgar-pipes.
 
 Loads configuration with the following precedence (highest to lowest):
-1. Environment variables (EDGAR_PIPES_*)
-2. Config file (~/.config/edgar-pipes/config.toml)
+1. Config file (~/.config/edgar-pipes/config.toml) - user agent, theme
+2. Workspace file (.ft.toml) - database, journals, default ticker
 3. Built-in defaults
 """
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     "edgar": {
-        "user_agent": "edgar-pipes/0.2.1",  # Fallback (not ideal, prompt user)
+        "user_agent": "edgar-pipes/0.3.0",  # Fallback (not ideal, prompt user)
     },
     "output": {
         "theme": "nobox-minimal",
@@ -32,13 +32,11 @@ def get_config_path() -> Path:
 def load_config() -> dict[str, Any]:
     """
     Load configuration with precedence:
-    1. Environment variables (highest)
+    1. Environment variables (highest) - user agent, theme only
     2. Config file (~/.config/edgar-pipes/config.toml)
     3. Built-in defaults (lowest)
 
-    Workspace path overrides (applied after workspace resolution):
-    - EDGAR_PIPES_DB_PATH: Override database location
-    - EDGAR_PIPES_JOURNALS: Override journals directory
+    Note: Workspace paths (database, journals) come from .ft.toml, not this config.
     """
     # Start with defaults
     config = {
@@ -59,7 +57,7 @@ def load_config() -> dict[str, Any]:
         except Exception as e:
             print(f"Warning: Could not load config file: {e}", file=sys.stderr)
 
-    # 2. Override with environment variables
+    # 2. Override with environment variables (user agent and theme only)
     env_overrides = {
         "EDGAR_PIPES_USER_AGENT": ("edgar", "user_agent"),
         "EDGAR_PIPES_THEME": ("output", "theme"),
@@ -119,66 +117,142 @@ theme = "nobox-minimal"
     return True
 
 
-def get_workspace_path(workspace_arg: str | None, context_workspace: str | None) -> Path:
+def find_workspace_config(start_dir: Path | None = None) -> Path | None:
     """
-    Resolve workspace with priority:
-    1. --ws flag (explicit)
-    2. Context from pipeline
-    3. Current directory (default)
-
-    Returns Path to workspace directory.
-    Raises RuntimeError if explicit workspace doesn't exist.
-    """
-    if workspace_arg:
-        ws = Path(workspace_arg).expanduser().resolve()
-        if not ws.is_dir():
-            raise RuntimeError(f"workspace not found: {ws}")
-        return ws
-
-    if context_workspace:
-        return Path(context_workspace)
-
-    return Path.cwd()
-
-
-def get_db_path(workspace: Path) -> Path:
-    """
-    Get database file path.
-
-    Priority:
-    1. EDGAR_PIPES_DB_PATH environment variable (absolute or relative to CWD)
-    2. {workspace}/store.db (default)
-
-    Returns absolute path.
-    """
-    env_path = os.getenv('EDGAR_PIPES_DB_PATH')
-    if env_path:
-        return Path(env_path).expanduser().resolve()
-
-    return workspace / "store.db"
-
-
-def get_journal_path(workspace: Path, journal_name: str = "default") -> Path:
-    """
-    Get journal file path for workspace-specific journals.
+    Find .ft.toml by walking up directory tree from start_dir.
 
     Args:
-        workspace: Workspace directory (used if no env override)
+        start_dir: Directory to start search from (default: current directory)
+
+    Returns:
+        Path to .ft.toml file if found, None otherwise
+    """
+    if start_dir is None:
+        start_dir = Path.cwd()
+
+    current = start_dir.resolve()
+
+    # Walk up directory tree
+    while True:
+        ft_config = current / ".ft.toml"
+        if ft_config.exists():
+            return ft_config
+
+        # Check if we've reached the root
+        parent = current.parent
+        if parent == current:
+            # Reached filesystem root
+            return None
+
+        current = parent
+
+
+def load_workspace_config(context_workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
+    """
+    Load workspace configuration from .ft.toml file.
+
+    Args:
+        context_workspace: Workspace path from pipeline context (if available)
+
+    Returns:
+        Tuple of (workspace_root, workspace_config)
+
+    Raises:
+        RuntimeError: If no .ft.toml file found
+    """
+    # If context provides workspace, use that directory to find .ft.toml
+    if context_workspace:
+        start_dir = Path(context_workspace)
+    else:
+        start_dir = Path.cwd()
+
+    ft_config_path = find_workspace_config(start_dir)
+
+    if ft_config_path is None:
+        error_msg = f"""No .ft.toml workspace configuration found.
+
+Searched from: {start_dir}
+
+Create a .ft.toml file in your workspace directory:
+
+[workspace]
+ticker = "AAPL"  # Optional: default ticker
+
+[edgar-pipes]
+database = "db/edgar.db"
+journals = "src/journals"
+
+See https://github.com/emifrn/edgar-pipes for more information."""
+        raise RuntimeError(error_msg)
+
+    # Load the TOML file
+    try:
+        with open(ft_config_path, "rb") as f:
+            workspace_config = tomllib.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Error loading {ft_config_path}: {e}")
+
+    # Validate required sections
+    if "edgar-pipes" not in workspace_config:
+        raise RuntimeError(f"{ft_config_path}: Missing required [edgar-pipes] section")
+
+    ep_config = workspace_config["edgar-pipes"]
+    if "database" not in ep_config:
+        raise RuntimeError(f"{ft_config_path}: Missing required 'database' in [edgar-pipes] section")
+    if "journals" not in ep_config:
+        raise RuntimeError(f"{ft_config_path}: Missing required 'journals' in [edgar-pipes] section")
+
+    # Workspace root is the directory containing .ft.toml
+    workspace_root = ft_config_path.parent
+
+    return workspace_root, workspace_config
+
+
+def get_db_path(workspace_root: Path, workspace_config: dict[str, Any]) -> Path:
+    """
+    Get database file path from workspace configuration.
+
+    Args:
+        workspace_root: Directory containing .ft.toml
+        workspace_config: Loaded workspace configuration
+
+    Returns:
+        Absolute path to database file
+    """
+    db_path = workspace_config["edgar-pipes"]["database"]
+    return (workspace_root / db_path).resolve()
+
+
+def get_journal_path(workspace_root: Path, workspace_config: dict[str, Any], journal_name: str = "default") -> Path:
+    """
+    Get journal file path from workspace configuration.
+
+    Args:
+        workspace_root: Directory containing .ft.toml
+        workspace_config: Loaded workspace configuration
         journal_name: Journal name (e.g., "default", "setup", "daily")
 
-    Priority:
-    1. EDGAR_PIPES_JOURNALS environment variable (absolute or relative to CWD)
-    2. {workspace}/journals/ (default)
-
-    Returns absolute path to journal file.
+    Returns:
+        Absolute path to journal file
     """
-    env_dir = os.getenv('EDGAR_PIPES_JOURNALS')
-    if env_dir:
-        journals_dir = Path(env_dir).expanduser().resolve()
-    else:
-        journals_dir = workspace / "journals"
+    journals_dir = workspace_config["edgar-pipes"]["journals"]
+    journals_path = (workspace_root / journals_dir).resolve()
+    return journals_path / f"{journal_name}.jsonl"
 
-    return journals_dir / f"{journal_name}.jsonl"
+
+def get_default_ticker(workspace_config: dict[str, Any]) -> str | None:
+    """
+    Get default ticker from workspace configuration if specified.
+
+    Args:
+        workspace_config: Loaded workspace configuration
+
+    Returns:
+        Default ticker string or None if not specified
+    """
+    if "workspace" in workspace_config:
+        return workspace_config["workspace"].get("ticker")
+    return None
 
 
 def get_history_path() -> Path:

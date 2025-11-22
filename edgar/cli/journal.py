@@ -242,11 +242,11 @@ def parse_indices(indices_str: str) -> Result[tuple[list[int], bool], str]:
     return ok((indices, is_lenient))
 
 
-def journal_replay(workspace: Path, journal_name: str, targets: list[str]) -> Result[None, str]:
+def journal_replay(workspace_root: Path, workspace_config: dict, journal_name: str, targets: list[str]) -> Result[None, str]:
     """Replay journal commands from workspace."""
     from edgar import config
 
-    journal_path = config.get_journal_path(workspace, journal_name)
+    journal_path = config.get_journal_path(workspace_root, workspace_config, journal_name)
 
     # Parse indices if provided
     indices = None
@@ -305,7 +305,7 @@ def run_journal_view(cmd: Cmd, args) -> Result[None, str]:
         from edgar import config
 
         # Read from workspace journal
-        journal_path = config.get_journal_path(args.workspace, args.journal_name)
+        journal_path = config.get_journal_path(args.workspace_root, args.workspace_config, args.journal_name)
 
         # Read entries
         result = read_entries(journal_path)
@@ -348,7 +348,7 @@ def run_journal_replay(cmd: Cmd, args) -> Result[None, str]:
     """Handle journal replay command."""
     journal_name = args.journal_name if hasattr(args, 'journal_name') else "default"
     targets = args.targets if hasattr(args, 'targets') else []
-    return journal_replay(args.workspace, journal_name, targets)
+    return journal_replay(args.workspace_root, args.workspace_config, journal_name, targets)
 
 
 # =============================================================================

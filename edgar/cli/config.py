@@ -6,6 +6,7 @@ Manage edgar-pipes configuration.
 
 import os
 import sys
+from pathlib import Path
 from edgar import config as cfg
 from edgar.cli.shared import Cmd
 from edgar.result import Result, ok
@@ -38,16 +39,18 @@ def run(cmd: Cmd, args) -> Result[None, str]:
 
 def run_show(cmd: Cmd, args) -> Result[None, str]:
     """Show current configuration and workspace info."""
-    config = cfg.load_config()
+    user_config = cfg.load_config()
     config_path = cfg.get_config_path()
-    workspace = args.workspace
 
     # Check if config file exists
     config_status = "✓" if config_path.exists() else "✗ (not created yet)"
 
     # Get workspace paths
-    db_path = cfg.get_db_path(workspace)
-    journal_path = cfg.get_journal_path(workspace)
+    db_path = args.db_path
+    workspace_root = args.workspace_root
+
+    # Find journals directory
+    journals_dir = workspace_root / args.workspace_config["edgar-pipes"]["journals"]
 
     # Get database size if it exists
     db_info = ""
@@ -57,41 +60,53 @@ def run_show(cmd: Cmd, args) -> Result[None, str]:
 
     # Get journal count if directory exists
     journal_info = ""
-    if journal_path.exists():
-        journal_files = list(journal_path.glob("*.jsonl"))
+    if journals_dir.exists():
+        journal_files = list(journals_dir.glob("*.jsonl"))
         if journal_files:
             journal_info = f" ({len(journal_files)} journal(s))"
+
+    # Get .ft.toml location
+    ft_config_path = cfg.find_workspace_config(workspace_root)
+    ft_status = "✓" if ft_config_path else "✗ (not found)"
+
+    # Get default ticker if set
+    default_ticker = cfg.get_default_ticker(args.workspace_config)
 
     # Print configuration
     print("\nEdgar-pipes Configuration", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
-    print(f"\nConfig file: {config_path} {config_status}", file=sys.stderr)
-    print(f"\n[edgar]", file=sys.stderr)
-    print(f"  user_agent = \"{config['edgar']['user_agent']}\"", file=sys.stderr)
-    print(f"\n[database]", file=sys.stderr)
-    print(f"  path = {db_path}{db_info}", file=sys.stderr)
-    print(f"\n[journal]", file=sys.stderr)
-    print(f"  path = {journal_path}{journal_info}", file=sys.stderr)
-    print(f"\n[output]", file=sys.stderr)
-    print(f"  theme = \"{config['output']['theme']}\"\n", file=sys.stderr)
+
+    print(f"\nUser config: {config_path} {config_status}", file=sys.stderr)
+    print(f"[edgar]", file=sys.stderr)
+    print(f"  user_agent = \"{user_config['edgar']['user_agent']}\"", file=sys.stderr)
+    print(f"[output]", file=sys.stderr)
+    print(f"  theme = \"{user_config['output']['theme']}\"", file=sys.stderr)
+
+    print(f"\nWorkspace config: {ft_config_path} {ft_status}", file=sys.stderr)
+    if default_ticker:
+        print(f"[workspace]", file=sys.stderr)
+        print(f"  ticker = \"{default_ticker}\"", file=sys.stderr)
+    print(f"[edgar-pipes]", file=sys.stderr)
+    print(f"  database = {db_path}{db_info}", file=sys.stderr)
+    print(f"  journals = {journals_dir}{journal_info}\n", file=sys.stderr)
 
     return ok(None)
 
 
 def run_show_env(cmd: Cmd, args) -> Result[None, str]:
     """Show environment variables."""
-    # Check which environment variables are set
+    # Check which environment variables are set (only user-agent and theme now)
     env_vars = {
         "EDGAR_PIPES_USER_AGENT": os.getenv("EDGAR_PIPES_USER_AGENT"),
         "EDGAR_PIPES_THEME": os.getenv("EDGAR_PIPES_THEME"),
-        "EDGAR_PIPES_DB_PATH": os.getenv("EDGAR_PIPES_DB_PATH"),
-        "EDGAR_PIPES_JOURNALS": os.getenv("EDGAR_PIPES_JOURNALS"),
         "XDG_CONFIG_HOME": os.getenv("XDG_CONFIG_HOME"),
     }
 
     # Print environment variables
     print("\nEnvironment Variables", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
+    print("\nNote: Database and journal paths are now configured via .ft.toml", file=sys.stderr)
+    print("      (not environment variables)\n", file=sys.stderr)
     for var_name, var_value in env_vars.items():
         if var_value:
             print(f"  {var_name}={var_value}", file=sys.stderr)

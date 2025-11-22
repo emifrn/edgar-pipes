@@ -45,7 +45,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
 
     Can be used with direct arguments or piped role data.
     """
-    conn = sqlite3.connect(config.get_db_path(args.workspace))
+    conn = sqlite3.connect(args.db_path)
     conn.row_factory = sqlite3.Row
 
     try:

@@ -15,7 +15,6 @@ def add_arguments(parser):
     """Define the CLI interface and register all available subcommands."""
 
     # Global options for main edgar command
-    parser.add_argument("-w", "--ws", metavar="PATH", help="workspace directory (default: current directory)")
     parser.add_argument("-j", "--journal", nargs="?", const="default", metavar="NAME",
                        help="record command to journal (default: journals/default.jsonl, or journals/NAME.jsonl)")
     parser.add_argument("-d", "--debug", action="store_true", help="print pipeline data to stderr")
@@ -26,19 +25,19 @@ def add_arguments(parser):
     format_group.add_argument("--table", action="store_true", help="output in table format")
     format_group.add_argument("--csv", action="store_true", help="output in CSV format")
     format_group.add_argument("--tsv", action="store_true", help="output in TSV format (gnuplot native format)")
-    
-    parser.add_argument("--theme", metavar="X", 
-                        choices=["default", "financial", "financial-light", 
+
+    parser.add_argument("--theme", metavar="X",
+                        choices=["default", "financial", "financial-light",
                                  "financial-dark", "minimal", "minimal-light",
                                  "minimal-dark", "grid", "grid-light",
                                  "grid-dark", "nobox", "nobox-light",
                                  "nobox-dark", "nobox-minimal",
-                                 "nobox-minimal-light", "nobox-minimal-dark"], 
-                        help="table theme for output formatting")   
+                                 "nobox-minimal-light", "nobox-minimal-dark"],
+                        help="table theme for output formatting")
 
     # Subcommand parsers
     subparsers = parser.add_subparsers()
-    
+
     # Register subcommands from their respective modules
     cli.add.add_arguments(subparsers)
     cli.new.add_arguments(subparsers)
@@ -92,22 +91,27 @@ def cli_main(args):
         # Extract packet and context
         input_packet, input_context = stdin_result[1]
 
-        # Resolve workspace (priority: --ws flag, context, current directory)
+        # Load workspace configuration from .ft.toml
         try:
-            workspace = config.get_workspace_path(args.ws, input_context.get("workspace"))
+            workspace_root, workspace_config = config.load_workspace_config(
+                input_context.get("workspace")
+            )
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             return
 
-        # Set workspace in args for commands
-        args.workspace = workspace
+        # Set workspace paths in args for commands
+        args.workspace_root = workspace_root
+        args.workspace_config = workspace_config
+        args.db_path = config.get_db_path(workspace_root, workspace_config)
+        args.default_ticker = config.get_default_ticker(workspace_config)
 
-        # Build context for output
-        context = {"workspace": str(workspace)}
+        # Build context for output (workspace root propagates through pipeline)
+        context = {"workspace": str(workspace_root)}
 
         # Build packet with pipeline history
         packet = pipeline.add(input_packet, current_cmd)
-        
+
         # Execute command with Cmd pattern
         cmd = packet["cmd"] if input_packet else {"name": "", "data": []}
         result = args.func(cmd, args)
@@ -124,7 +128,7 @@ def cli_main(args):
 
             # Conditionally write to explicit journal
             if hasattr(args, 'journal') and args.journal:
-                journal_path = config.get_journal_path(workspace, args.journal)
+                journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
                 cli.journal.write_entry(journal_path, packet["pipeline"], "ERROR", error_msg)
 
             if pipeline.output_format() == 'packet':
@@ -140,7 +144,7 @@ def cli_main(args):
 
             # Conditionally write to explicit journal
             if hasattr(args, 'journal') and args.journal:
-                journal_path = config.get_journal_path(workspace, args.journal)
+                journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
                 cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
         else:
@@ -182,7 +186,7 @@ def cli_main(args):
 
                 # Conditionally write to explicit journal
                 if hasattr(args, 'journal') and args.journal:
-                    journal_path = config.get_journal_path(workspace, args.journal)
+                    journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
                     cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
 
     except KeyboardInterrupt:
@@ -195,9 +199,10 @@ def cli_main(args):
             cli.journal.write_entry(history_path, [current_cmd], "ERROR", error_msg)
 
             # Also write to explicit journal if requested
-            if 'args' in locals() and hasattr(args, 'journal') and args.journal and 'workspace' in locals():
-                journal_path = config.get_journal_path(workspace, args.journal)
-                cli.journal.write_entry(journal_path, [current_cmd], "ERROR", error_msg)
+            if 'args' in locals() and hasattr(args, 'journal') and args.journal:
+                if 'workspace_root' in locals() and 'workspace_config' in locals():
+                    journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
+                    cli.journal.write_entry(journal_path, [current_cmd], "ERROR", error_msg)
         except:
             pass  # Don't fail on journal errors during exception handling
         print(error_msg, file=sys.stderr)
@@ -209,7 +214,7 @@ def main():
     cfg = config.load_config()
 
     # Check if user_agent is still default (first run - needs setup)
-    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.2.1":
+    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.3.0":
         config.init_config_interactive()
         cfg = config.load_config()
 
@@ -226,33 +231,45 @@ Available themes:
 Environment variables:
   EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
   EDGAR_PIPES_THEME         Default table theme
-  EDGAR_PIPES_DB_PATH       Override database location (absolute or relative to CWD)
-  EDGAR_PIPES_JOURNALS      Override journals directory (absolute or relative to CWD)
 
 Configuration:
-  Config file: ~/.config/edgar-pipes/config.toml
+  User config: ~/.config/edgar-pipes/config.toml (user agent, theme)
+  Workspace config: .ft.toml (database, journals, default ticker)
+
   Use "ep config show" to view configuration
   Use "ep config env" to view environment variables
 
-Workspace:
-  Workspace contains store.db and journals/ directory
-  Default: current directory
-  Override workspace: -w PATH or --ws PATH
-  Override paths: EDGAR_PIPES_DB_PATH and EDGAR_PIPES_JOURNALS
+Workspace (.ft.toml):
+  edgar-pipes finds .ft.toml by walking up from current directory
+
+  Create .ft.toml in your workspace:
+
+  [workspace]
+  ticker = "AAPL"  # Optional: default ticker
+
+  [edgar-pipes]
+  database = "db/edgar.db"
+  journals = "src/journals"
 
 Examples:
-  # Standard workspace model
+  # Create workspace and .ft.toml
   mkdir aapl && cd aapl
-  ep probe filings -t AAPL --force
-  ep select patterns -t AEO -g Balance
-  ep new group "Current Assets" --from Balance -t AEO --uid 1 2 3
-  ep select concepts -t AAPL | ep delete -y
-  ep -w aapl select filings | ep select roles -g Balance | ep probe concepts
+  cat > .ft.toml <<EOF
+  [edgar-pipes]
+  database = "store.db"
+  journals = "journals"
+  EOF
 
-  # Custom layout with env vars
-  export EDGAR_PIPES_DB_PATH=build/store.db
-  export EDGAR_PIPES_JOURNALS=src/journals
-  ep -j setup probe filings -t AAPL
+  ep probe filings -t AAPL --force
+  ep select patterns -t AAPL -g Balance
+  ep new group "Current Assets" --from Balance -t AAPL --uid 1 2 3
+
+  # Pipeline commands (workspace propagates automatically)
+  ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
+
+  # Record to journal
+  ep -j probe filings -t AAPL
+  ep -j setup new role -t AAPL -n balance -p 'PATTERN'
 
   # View command history
   ep history                    # System-wide history from /tmp

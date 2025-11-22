@@ -21,7 +21,7 @@ def add_arguments(subparsers):
 
 
 def run(cmd: Cmd, args) -> Result[None, str]:
-    conn = sqlite3.connect(config.get_db_path(args.workspace))
+    conn = sqlite3.connect(args.db_path)
     conn.row_factory = sqlite3.Row
     try:
         result = db.store.init(conn)

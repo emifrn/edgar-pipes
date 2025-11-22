@@ -47,7 +47,7 @@ def run(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """
     
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
         
         result = db.store.init(conn)
         if is_not_ok(result):

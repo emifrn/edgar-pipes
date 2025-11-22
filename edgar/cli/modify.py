@@ -81,7 +81,7 @@ def run_modify_group(cmd: Cmd, args) -> Result[Cmd | None, str]:
     """Modify group names or remove patterns with preview/execute workflow."""
 
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -311,7 +311,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
             return err(f"modify role: invalid regex pattern: {e}")
     
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
         
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -386,7 +386,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
             return err(f"modify concept: invalid regex pattern: {e}")
     
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
         
         result = db.store.init(conn)
         if is_not_ok(result):

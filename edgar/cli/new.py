@@ -94,7 +94,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         return err(f"new concept: invalid regex pattern: {e}")
 
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -155,7 +155,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         return err(f"new role: invalid regex pattern: {e}")
 
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
 
         result = db.store.init(conn)
         if is_not_ok(result):
@@ -208,7 +208,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
     Create a group, optionally derived from another group.
     """
     try:
-        conn = sqlite3.connect(config.get_db_path(args.workspace))
+        conn = sqlite3.connect(args.db_path)
 
         result = db.store.init(conn)
         if is_not_ok(result):
