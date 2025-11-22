@@ -183,50 +183,43 @@ nano ~/.config/edgar-pipes/config.toml
 
 ### Working with Workspaces
 
-edgar-pipes uses workspaces to organize your analysis. A workspace is a directory containing:
-- `store.db` - SQLite database with filings, roles, concepts, and facts
-- `journals/` - Journal directory (optional, created with `-j` flag)
-  - `default.jsonl` - Default journal (created with `-j`)
-  - `setup.jsonl`, `daily.jsonl`, etc. - Named journals (created with `-j NAME`)
+edgar-pipes uses workspaces to organize your analysis. A workspace is configured via a `.ft.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
 
 ```bash
-# Create and use a workspace
+# Create workspace directory
 mkdir aapl && cd aapl
-ep probe filings -t AAPL  # Auto-creates store.db
 
-# Or use explicit workspace flag
-ep -w aapl probe filings -t AAPL
+# Create .ft.toml configuration
+cat > .ft.toml <<EOF
+[workspace]
+ticker = "AAPL"  # Optional: default ticker
 
-# Workspace propagates through pipelines
-ep -w aapl probe filings -t AAPL | ep select filings | ep select roles
-# Only first command needs -w, rest inherit from context
+[edgar-pipes]
+database = "store.db"
+journals = "journals"
+EOF
 
-# Switch workspaces by changing directory
-cd ../msft
-ep probe filings -t MSFT
+# Start working - edgar-pipes finds .ft.toml automatically
+ep probe filings -t AAPL  # Creates store.db
+ep -j new role -t AAPL -n balance -p 'PATTERN'  # Creates journals/default.jsonl
 ```
 
-Workspaces let you maintain separate analyses for different companies or projects,
-with database and journal always kept together.
-
-#### Custom workspaces defined by environment variables
-
-For project-based workflows, you can override database and journal locations
-using environment variables:
-
-```bash
-# Separate source from build artifacts
-project/
-  src/journals/     # Version-controlled journals (source)
-  build/store.db    # Generated database (build artifact)
-  output/           # Reports and exports
-
-export EDGAR_PIPES_DB_PATH=build/store.db
-export EDGAR_PIPES_JOURNALS=src/journals
-
-ep -j setup probe filings -t AAPL
-ep journal replay setup  # Rebuilds database from journals
+Typical directory structure:
 ```
+aapl/
+  .ft.toml          # Workspace configuration
+  store.db          # SQLite database
+  journals/         # Journal files
+    default.jsonl
+    setup.jsonl
+```
+
+**Key features:**
+- Paths in `.ft.toml` are relative to the `.ft.toml` file location
+- edgar-pipes finds `.ft.toml` by walking up from current directory
+- Workspace root propagates through pipelines automatically
+- Optional default ticker simplifies repetitive commands
+- `.ft.toml` can be version-controlled for reproducible workflows
 
 ### Workflows
 
@@ -384,8 +377,9 @@ ep journal replay setup       # Replay setup journal
 ep journal replay setup 5:10,13,15,18:22
 ep journal replay daily 1,5,8
 
-# Replay from different workspace
-ep -w ~/aapl journal replay setup
+# Replay from different workspace (cd to it first - .ft.toml is auto-discovered)
+cd ~/aapl
+ep journal replay setup
 ```
 
 #### Reports
@@ -473,21 +467,21 @@ perspectives are invaluable.
 
 ## Roadmap
 
-Ideas for future development and up for discussion
+Planned features and enhancements (in no particular order):
 
-### v0.2.0 (Future)
-- Dimensional data support
+**Data Extraction:**
+- Dimensional data support (member attributes, axes, segments)
 - Support for international filers (20-F)
-- Community pattern library
-
-### v0.3.0 (Future)
 - Textual data extraction from 10-K/10-Q (MD&A, Risk Factors, footnotes)
-- MCP Server for AI agent integration
-
-### v0.4.0 (Future)
 - Additional filing types (8-K, DEF 14A, Form 4)
+
+**Analysis & Integration:**
 - Insider trading transaction tracking (Form 4 analysis)
 - Institutional holdings monitoring (13F filings)
+- MCP Server for AI agent integration
+
+**Community:**
+- Community pattern library (share role/concept patterns across users)
 
 ## License
 
