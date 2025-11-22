@@ -393,7 +393,7 @@ Location resolution (priority order):
     3. Current directory (default)
 
   Journal files:
-    1. EDGAR_PIPES_JOURNALS_DIR env var (overrides workspace)
+    1. EDGAR_PIPES_JOURNALS env var (overrides workspace)
     2. {workspace}/journals/ (default)
 
   Final path: {journals_dir}/{journal_name}.jsonl

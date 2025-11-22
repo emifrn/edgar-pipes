@@ -222,7 +222,7 @@ project/
   output/           # Reports and exports
 
 export EDGAR_PIPES_DB_PATH=build/store.db
-export EDGAR_PIPES_JOURNALS_DIR=src/journals
+export EDGAR_PIPES_JOURNALS=src/journals
 
 ep -j setup probe filings -t AAPL
 ep journal replay setup  # Rebuilds database from journals

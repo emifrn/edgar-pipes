@@ -38,7 +38,7 @@ def load_config() -> dict[str, Any]:
 
     Workspace path overrides (applied after workspace resolution):
     - EDGAR_PIPES_DB_PATH: Override database location
-    - EDGAR_PIPES_JOURNALS_DIR: Override journals directory
+    - EDGAR_PIPES_JOURNALS: Override journals directory
     """
     # Start with defaults
     config = {
@@ -167,12 +167,12 @@ def get_journal_path(workspace: Path, journal_name: str = "default") -> Path:
         journal_name: Journal name (e.g., "default", "setup", "daily")
 
     Priority:
-    1. EDGAR_PIPES_JOURNALS_DIR environment variable (absolute or relative to CWD)
+    1. EDGAR_PIPES_JOURNALS environment variable (absolute or relative to CWD)
     2. {workspace}/journals/ (default)
 
     Returns absolute path to journal file.
     """
-    env_dir = os.getenv('EDGAR_PIPES_JOURNALS_DIR')
+    env_dir = os.getenv('EDGAR_PIPES_JOURNALS')
     if env_dir:
         journals_dir = Path(env_dir).expanduser().resolve()
     else:

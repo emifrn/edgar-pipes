@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Workspace Path Overrides**
 - `EDGAR_PIPES_DB_PATH` environment variable to override database location
-- `EDGAR_PIPES_JOURNALS_DIR` environment variable to override journals directory
+- `EDGAR_PIPES_JOURNALS` environment variable to override journals directory
 - Supports custom workspace layouts (e.g., separate src/journals from build/store.db)
 - Enables build system paradigm: journals as source, database as build artifact
 
@@ -47,7 +47,7 @@ ep journal setup
 
 # Custom workspace layout (new capability)
 export EDGAR_PIPES_DB_PATH=build/store.db
-export EDGAR_PIPES_JOURNALS_DIR=src/journals
+export EDGAR_PIPES_JOURNALS=src/journals
 ep -j setup probe filings -t AAPL
 ```
 

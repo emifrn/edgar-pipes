@@ -227,7 +227,7 @@ Environment variables:
   EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
   EDGAR_PIPES_THEME         Default table theme
   EDGAR_PIPES_DB_PATH       Override database location (absolute or relative to CWD)
-  EDGAR_PIPES_JOURNALS_DIR  Override journals directory (absolute or relative to CWD)
+  EDGAR_PIPES_JOURNALS      Override journals directory (absolute or relative to CWD)
 
 Configuration:
   Config file: ~/.config/edgar-pipes/config.toml
@@ -238,7 +238,7 @@ Workspace:
   Workspace contains store.db and journals/ directory
   Default: current directory
   Override workspace: -w PATH or --ws PATH
-  Override paths: EDGAR_PIPES_DB_PATH and EDGAR_PIPES_JOURNALS_DIR
+  Override paths: EDGAR_PIPES_DB_PATH and EDGAR_PIPES_JOURNALS
 
 Examples:
   # Standard workspace model
@@ -251,7 +251,7 @@ Examples:
 
   # Custom layout with env vars
   export EDGAR_PIPES_DB_PATH=build/store.db
-  export EDGAR_PIPES_JOURNALS_DIR=src/journals
+  export EDGAR_PIPES_JOURNALS=src/journals
   ep -j setup probe filings -t AAPL
 
   # View command history

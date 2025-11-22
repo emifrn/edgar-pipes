@@ -85,7 +85,7 @@ def run_show_env(cmd: Cmd, args) -> Result[None, str]:
         "EDGAR_PIPES_USER_AGENT": os.getenv("EDGAR_PIPES_USER_AGENT"),
         "EDGAR_PIPES_THEME": os.getenv("EDGAR_PIPES_THEME"),
         "EDGAR_PIPES_DB_PATH": os.getenv("EDGAR_PIPES_DB_PATH"),
-        "EDGAR_PIPES_JOURNALS_DIR": os.getenv("EDGAR_PIPES_JOURNALS_DIR"),
+        "EDGAR_PIPES_JOURNALS": os.getenv("EDGAR_PIPES_JOURNALS"),
         "XDG_CONFIG_HOME": os.getenv("XDG_CONFIG_HOME"),
     }
 

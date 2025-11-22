@@ -398,7 +398,7 @@ ep -w aapl probe filings -t aapl | ep select filings | ep select roles
 ```bash
 # Separate source from build artifacts
 export EDGAR_PIPES_DB_PATH=build/store.db
-export EDGAR_PIPES_JOURNALS_DIR=src/journals
+export EDGAR_PIPES_JOURNALS=src/journals
 
 ep -j setup probe filings -t AAPL        # Journal → src/journals/setup.jsonl
 ep update -t AAPL                         # Database → build/store.db
