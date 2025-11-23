@@ -24,12 +24,11 @@ def add_arguments(subparsers):
 
     # stats concepts
     parser_concepts = subparsers_stats.add_parser("concepts", help="show concept frequency analysis")
-    parser_concepts.add_argument("-t", "--ticker", help="company ticker symbol")
-    parser_concepts.add_argument("-g", "--group", help="group name")
-    parser_concepts.add_argument("-p", "--pattern", help="role name pattern (regex)")
-    parser_concepts.add_argument("--limit", type=int, default=1,
-                                 help="minimum number of filings (default: 1)")
-    parser_concepts.add_argument("--sort", choices=["count", "tag", "first", "last"],
+    parser_concepts.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol")
+    parser_concepts.add_argument("-g", "--group", metavar="X", help="group name")
+    parser_concepts.add_argument("-p", "--pattern", metavar="X", help="role name pattern (regex)")
+    parser_concepts.add_argument("-l", "--limit", metavar="X", type=int, default=1, help="minimum number of filings (default: 1)")
+    parser_concepts.add_argument("-s", "--sort", choices=["count", "tag", "first", "last"],
                                  default="count", help="sort by field (default: count)")
     parser_concepts.set_defaults(func=run_concepts)
 
@@ -55,9 +54,15 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
             return result
 
         # Get CIK from ticker
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+
         cik = None
-        if args.ticker:
-            result = db.queries.entities.select(conn, [args.ticker])
+        if ticker:
+            result = db.queries.entities.select(conn, [ticker])
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -65,7 +70,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
             entities = result[1]
             if not entities:
                 conn.close()
-                return err(f"ticker '{args.ticker}' not found")
+                return err(f"ticker '{ticker}' not found")
 
             cik = entities[0]["cik"]
 
@@ -119,7 +124,7 @@ def run_concepts(cmd: Cmd, args) -> Result[Cmd, str]:
             filings = result[1]
             if not filings:
                 conn.close()
-                return err(f"no filings found for ticker '{args.ticker}'")
+                return err(f"no filings found for ticker '{ticker}'")
 
             access_nos = [f["access_no"] for f in filings]
 

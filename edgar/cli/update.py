@@ -15,8 +15,8 @@ from edgar.cli.shared import Cmd
 def add_arguments(subparsers):
     """Add update command to argument parser."""
     parser_update = subparsers.add_parser("update", help="extract facts from company filings")
-    parser_update.add_argument("-t", "--ticker", nargs="+", help="company ticker symbols (if not specified, updates all)")
-    parser_update.add_argument("-g", "--group", nargs="+", help="limit to specific groups (if not specified, updates all groups)")
+    parser_update.add_argument("-t", "--ticker", metavar="X", nargs="+", help="company ticker symbols (if not specified, updates all)")
+    parser_update.add_argument("-g", "--group", metavar="X", nargs="+", help="limit to specific groups (if not specified, updates all groups)")
     parser_update.set_defaults(func=run)
 
 
@@ -34,7 +34,11 @@ def run(cmd: Cmd, args) -> Result[None, str]:
 
         # Select entities from database (no external fetching)
         # If no tickers specified, get all tickers from database
-        tickers = args.ticker if args.ticker else None
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml
+        tickers = args.ticker if args.ticker else (
+            [args.default_ticker] if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
         result = db.queries.entities.select(conn, tickers)
         if is_not_ok(result):
             conn.close()

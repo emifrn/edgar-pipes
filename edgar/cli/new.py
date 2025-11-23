@@ -30,7 +30,7 @@ def add_arguments(subparsers):
     parser_concept.add_argument("-t", "--ticker", metavar="X", required=True, help="company ticker symbol")
     parser_concept.add_argument("-n", "--name", metavar="X", required=True, help="concept name")
     parser_concept.add_argument("-p", "--pattern", metavar="X", required=True, help="regex pattern")
-    parser_concept.add_argument("-u", "--uid", type=int, help="optional user-assigned ID")
+    parser_concept.add_argument("-u", "--uid", metavar="X", type=int, help="optional user-assigned ID")
     parser_concept.add_argument("--note", metavar="X", help="optional note describing the pattern rationale")
     parser_concept.set_defaults(func=run)
 
@@ -45,16 +45,16 @@ def add_arguments(subparsers):
     # new group
     parser_group = new_subparsers.add_parser("group", help="create group, optionally derived from another")
     parser_group.add_argument("group_name", metavar="X", help="group name")
-    parser_group.add_argument("-t", "--ticker", help="company ticker symbol (required with --from)")
+    parser_group.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol (required with --from)")
 
     # Derivation source
-    parser_group.add_argument("--from", dest="source_group", help="source group to derive from")
+    parser_group.add_argument("-f", "--from", metavar="X", dest="source_group", help="source group to derive from")
 
     # Concept filters (default, common case)
     parser_group.add_argument("-u", "--uid", metavar='X', nargs="+", type=int, help="filter concepts by user IDs")
-    parser_group.add_argument("--pattern", metavar='X', help="filter concepts by name regex")
-    parser_group.add_argument("--exclude", metavar='X', help="exclude concepts by name regex")
-    parser_group.add_argument("--names", metavar='X', nargs="+", help="filter concepts by names")
+    parser_group.add_argument("-p", "--pattern", metavar='X', help="filter concepts by name regex")
+    parser_group.add_argument("-e", "--exclude", metavar='X', help="exclude concepts by name regex")
+    parser_group.add_argument("-n", "--names", metavar='X', nargs="+", help="filter concepts by names")
 
     # Role filters (explicit, edge case)
     parser_group.add_argument("--role-pattern", metavar='X', dest="role_pattern", help="filter roles by name regex")
@@ -102,7 +102,16 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entities.select(conn, [args.ticker])
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+        if not ticker:
+            conn.close()
+            return err("new concept: ticker required. Use --ticker or set default ticker in ft.toml.")
+
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -110,7 +119,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         entities = result[1]
         if not entities:
             conn.close()
-            return err(f"new concept: ticker '{args.ticker}' not found. Run 'probe filings' first.")
+            return err(f"new concept: ticker '{ticker}' not found. Run 'probe filings' first.")
 
         entity = entities[0]
         cik = entity["cik"]
@@ -127,7 +136,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         pattern_id = result[1]
 
         # Report success
-        print(f"Created concept pattern '{args.name}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Created concept pattern '{args.name}' for {ticker.upper()} ({company_name})", file=sys.stderr)
         print(f"Pattern ID: {pattern_id}, CIK: {cik}", file=sys.stderr)
         if args.uid is not None:
             print(f"User ID: {args.uid}", file=sys.stderr)
@@ -163,7 +172,16 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entities.select(conn, [args.ticker])
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+        if not ticker:
+            conn.close()
+            return err("new role: ticker required. Use --ticker or set default ticker in ft.toml.")
+
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -171,7 +189,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         entities = result[1]
         if not entities:
             conn.close()
-            return err(f"new role: ticker '{args.ticker}' not found. Run 'probe filings' first.")
+            return err(f"new role: ticker '{ticker}' not found. Run 'probe filings' first.")
 
         entity = entities[0]
         cik = entity["cik"]
@@ -188,7 +206,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         pattern_id = result[1]
 
         # Report success
-        print(f"Created role pattern '{args.name}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Created role pattern '{args.name}' for {ticker.upper()} ({company_name})", file=sys.stderr)
         print(f"Pattern ID: {pattern_id}, CIK: {cik}", file=sys.stderr)
         print(f"Pattern: {args.pattern}", file=sys.stderr)
         if args.note:
@@ -255,7 +273,16 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             return ok(None)
 
         # Get ticker from database for derivation
-        result = db.queries.entities.select(conn, [args.ticker])
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+        if not ticker:
+            conn.close()
+            return err("new group: ticker required when using --from. Use --ticker or set default ticker in ft.toml.")
+
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -263,7 +290,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
         entities = result[1]
         if not entities:
             conn.close()
-            return err(f"new group: ticker '{args.ticker}' not found. Run 'probe filings' first.")
+            return err(f"new group: ticker '{ticker}' not found. Run 'probe filings' first.")
 
         entity = entities[0]
         cik = entity["cik"]
@@ -326,7 +353,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
             concepts_linked = result[1]
 
         # Report success
-        print(f"Derived from group '{args.source_group}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Derived from group '{args.source_group}' for {ticker.upper()} ({company_name})", file=sys.stderr)
         print(f"Linked {roles_linked} role pattern(s)", file=sys.stderr)
         print(f"Linked {concepts_linked} concept pattern(s)", file=sys.stderr)
 

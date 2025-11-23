@@ -386,22 +386,20 @@ Location:
         "journal",
         help="view or replay workspace journals",
         epilog='''
-Location resolution (priority order):
-  Workspace:
-    1. --ws PATH flag (explicit workspace directory)
-    2. Pipeline context (when piped from previous command)
-    3. Current directory (default)
+Location resolution:
+  Workspace discovery:
+    1. Pipeline context (when piped from previous command)
+    2. Current directory - searches for ft.toml walking up directory tree
+    3. Workspace root is directory containing ft.toml
 
-  Journal files:
-    1. EDGAR_PIPES_JOURNALS env var (overrides workspace)
-    2. {workspace}/journals/ (default)
-
-  Final path: {journals_dir}/{journal_name}.jsonl
+  Journal files location:
+    Defined in ft.toml [edgar-pipes] section: journals = "path/to/journals"
+    Final path: {workspace_root}/{journals_path}/{journal_name}.jsonl
 
 Examples:
   ep journal                      # View default journal in current workspace
   ep journal setup                # View setup journal
-  ep -w aapl journal              # View journal in aapl workspace
+  cd ~/workspaces/aapl && ep journal   # View journal in aapl workspace
   ep journal replay setup 1:10    # Replay commands 1-10 from setup journal''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )

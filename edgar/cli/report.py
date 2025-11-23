@@ -23,24 +23,20 @@ from edgar.result import Result, ok, err, is_ok, is_not_ok
 def add_arguments(subparsers):
     """Add report command to argument parser."""
     parser_report = subparsers.add_parser("report", help="generate financial reports from facts")
-    parser_report.add_argument("-t", "--ticker", help="company ticker symbol")
-    parser_report.add_argument("-g", "--group", required=True, help="group name (required)")
-    parser_report.add_argument("--date", nargs="+", metavar='X', help="filter facts by end date constraints ('>2024-01-01', '<=2024-12-31')")
-    parser_report.add_argument("--cols", nargs="+", help="filter output columns")
+    parser_report.add_argument("-t", "--ticker", metavar="X", help="company ticker symbol")
+    parser_report.add_argument("-g", "--group", metavar="X", required=True, help="group name (required)")
+    parser_report.add_argument("-d", "--date", metavar='X', nargs="+", help="filter facts by end date constraints ('>2024-01-01', '<=2024-12-31')")
+    parser_report.add_argument("-c", "--cols", metavar='X', nargs="+", help="filter output columns")
 
     # Period filtering - mutually exclusive
     period_group = parser_report.add_mutually_exclusive_group()
-    period_group.add_argument("-q", "--quarterly", action="store_true",
-                             help="show only quarterly data (Q1, Q2, Q3, Q4)")
-    period_group.add_argument("-y", "--yearly", action="store_true",
-                             help="show only annual data (FY)")
+    period_group.add_argument("-q", "--quarterly", action="store_true", help="show only quarterly data (Q1, Q2, Q3, Q4)")
+    period_group.add_argument("-y", "--yearly", action="store_true", help="show only annual data (FY)")
 
     # Mode filtering - mutually exclusive
     mode_group = parser_report.add_mutually_exclusive_group()
-    mode_group.add_argument("-i", "--instant", action="store_true",
-                           help="show only instant/point-in-time measurements (balance sheet items)")
-    mode_group.add_argument("-f", "--flow", action="store_true",
-                           help="show only flow/period measurements (income statement items)")
+    mode_group.add_argument("-i", "--instant", action="store_true", help="show only instant/point-in-time measurements (balance sheet items)")
+    mode_group.add_argument("-f", "--flow", action="store_true", help="show only flow/period measurements (income statement items)")
 
     # Scaling option
     parser_report.add_argument("-s", "--scale",
@@ -72,10 +68,17 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
             conn.close()
             return result
 
-        # Get CIK from piped data or explicit ticker
+        # Get CIK from piped data or explicit ticker or default ticker
         explicit_ciks = []
-        if args.ticker:
-            result = db.queries.entities.select(conn, [args.ticker])
+
+        # Priority 1: Explicit ticker from command line
+        # Priority 2: Default ticker from ft.toml (if no explicit ticker)
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+
+        if ticker:
+            result = db.queries.entities.select(conn, [ticker])
             if is_not_ok(result):
                 conn.close()
                 return result
@@ -83,11 +86,11 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
             entities = result[1]
             if not entities:
                 conn.close()
-                return err(f"ticker '{args.ticker}' not found")
+                return err(f"ticker '{ticker}' not found")
 
             explicit_ciks = [e["cik"] for e in entities]
 
-        # Merge with piped CIKs
+        # Priority 3: Merge with piped CIKs
         ciks = cli.shared.merge_stdin_field("cik", cmd["data"], explicit_ciks)
 
         if not ciks:

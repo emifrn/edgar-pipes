@@ -31,31 +31,31 @@ def add_arguments(subparsers):
 
     # add concept command
     parser_add_concept = add_subparsers.add_parser("concept", help="link concept patterns to group")
-    parser_add_concept.add_argument("-g", "--group", required=True, help="target group name")
-    parser_add_concept.add_argument("-t", "--ticker", required=True, help="company ticker symbol")
+    parser_add_concept.add_argument("-g", "--group", metavar="X", required=True, help="target group name")
+    parser_add_concept.add_argument("-t", "--ticker", metavar="X", required=True, help="company ticker symbol")
 
     # Source selection (optional)
-    parser_add_concept.add_argument("--from", dest="source_group", help="source group to derive from")
+    parser_add_concept.add_argument("-f", "--from", metavar="X", dest="source_group", help="source group to derive from")
 
     # Selection and filter arguments (work independently or with --from)
-    parser_add_concept.add_argument("--uid", "-u", nargs="+", type=int, help="select/filter by user IDs")
-    parser_add_concept.add_argument("--names", nargs="+", help="select/filter by concept names")
-    parser_add_concept.add_argument("--pattern", help="filter by concept name regex")
-    parser_add_concept.add_argument("--exclude", help="exclude by concept name regex")
+    parser_add_concept.add_argument("-u", "--uid", metavar="X", nargs="+", type=int, help="select/filter by user IDs")
+    parser_add_concept.add_argument("-n", "--names", metavar="X", nargs="+", help="select/filter by concept names")
+    parser_add_concept.add_argument("-p", "--pattern", metavar="X", help="filter by concept name regex")
+    parser_add_concept.add_argument("-e", "--exclude", metavar="X", help="exclude by concept name regex")
     parser_add_concept.set_defaults(func=run)
 
     # add role command
     parser_add_role = add_subparsers.add_parser("role", help="link role patterns to group")
-    parser_add_role.add_argument("-g", "--group", required=True, help="target group name")
-    parser_add_role.add_argument("-t", "--ticker", required=True, help="company ticker symbol")
+    parser_add_role.add_argument("-g", "--group", metavar="X", required=True, help="target group name")
+    parser_add_role.add_argument("-t", "--ticker", metavar="X", required=True, help="company ticker symbol")
 
     # Source selection (optional)
-    parser_add_role.add_argument("--from", dest="source_group", help="source group to derive from")
+    parser_add_role.add_argument("-f", "--from", metavar="X", dest="source_group", help="source group to derive from")
 
     # Selection and filter arguments
-    parser_add_role.add_argument("-n", "--names", nargs="+", help="select/filter by role names")
-    parser_add_role.add_argument("--pattern", help="filter by role name regex")
-    parser_add_role.add_argument("--exclude", help="exclude by role name regex")
+    parser_add_role.add_argument("-n", "--names", metavar="X", nargs="+", help="select/filter by role names")
+    parser_add_role.add_argument("-p", "--pattern", metavar="X", nargs="+", help="filter by role name regex")
+    parser_add_role.add_argument("-e", "--exclude", help="exclude by role name regex")
     parser_add_role.set_defaults(func=run)
 
 
@@ -86,7 +86,14 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entities.select(conn, [args.ticker])
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+        if not ticker:
+            conn.close()
+            return err("add concept: ticker required. Use --ticker or set default ticker in ft.toml.")
+
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -94,7 +101,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
         entities = result[1]
         if not entities:
             conn.close()
-            return err(f"add concept: ticker '{args.ticker}' not found. Run 'probe filings' first.")
+            return err(f"add concept: ticker '{ticker}' not found. Run 'probe filings' first.")
 
         entity = entities[0]
         cik = entity["cik"]
@@ -151,7 +158,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
         linked_count = result[1]
 
         # Report success
-        print(f"Linked {linked_count} concept pattern(s) to group '{args.group}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Linked {linked_count} concept pattern(s) to group '{args.group}' for {ticker.upper()} ({company_name})", file=sys.stderr)
 
         conn.close()
         return ok(None)
@@ -177,7 +184,14 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
             return result
 
         # Get ticker from database
-        result = db.queries.entities.select(conn, [args.ticker])
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+        if not ticker:
+            conn.close()
+            return err("add role: ticker required. Use --ticker or set default ticker in ft.toml.")
+
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             conn.close()
             return result
@@ -185,7 +199,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
         entities = result[1]
         if not entities:
             conn.close()
-            return err(f"add role: ticker '{args.ticker}' not found. Run 'probe filings' first.")
+            return err(f"add role: ticker '{ticker}' not found. Run 'probe filings' first.")
 
         entity = entities[0]
         cik = entity["cik"]
@@ -237,7 +251,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
         linked_count = result[1]
 
         # Report success
-        print(f"Linked {linked_count} role pattern(s) to group '{args.group}' for {args.ticker.upper()} ({company_name})", file=sys.stderr)
+        print(f"Linked {linked_count} role pattern(s) to group '{args.group}' for {ticker.upper()} ({company_name})", file=sys.stderr)
 
         conn.close()
         return ok(None)

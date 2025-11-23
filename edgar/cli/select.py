@@ -28,10 +28,10 @@ def add_arguments(subparsers):
     parser_filings = select_subparsers.add_parser("filings", help="filter company filings by criteria")
     parser_filings.add_argument("-t", "--ticker", metavar='X', help="company stock symbol (e.g., AAPL)")
     parser_filings.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
-    parser_filings.add_argument("--date", nargs="+", metavar="X", help="filter by filing date constraints ('>2024-01-01', '<=2024-12-31')")
-    parser_filings.add_argument("--form", nargs="+", metavar="X", help="SEC form types (10-K, 10-Q, etc.)")
-    parser_filings.add_argument("--limit", metavar="X", type=int, help="maximum results to return")
-    parser_filings.add_argument("--stubs", action="store_true", help="only filings missing fact data")
+    parser_filings.add_argument("-d", "--date", nargs="+", metavar="X", help="filter by filing date constraints ('>2024-01-01', '<=2024-12-31')")
+    parser_filings.add_argument("-f", "--form", nargs="+", metavar="X", help="SEC form types (10-K, 10-Q, etc.)")
+    parser_filings.add_argument("-l", "--limit", metavar="X", type=int, help="maximum results to return")
+    parser_filings.add_argument("-s", "--stubs", action="store_true", help="only filings missing fact data")
     parser_filings.set_defaults(func=run)
     
     # Roles subcommand
@@ -92,7 +92,7 @@ def add_arguments(subparsers):
     parser_patterns.add_argument("-g", "--group", help="logical group name")
     parser_patterns.add_argument("-p", "--pattern", metavar='X', help="regex pattern to filter concept names (applies to concept patterns only)")
     parser_patterns.add_argument("-c", "--cols", nargs="+", metavar='X', help="columns to include in output")
-    parser_patterns.add_argument("--uid", "-u", nargs="+", type=int, metavar='X', help="user IDs to select")
+    parser_patterns.add_argument("-u", "--uid", nargs="+", type=int, metavar='X', help="user IDs to select")
     parser_patterns.add_argument("--type", metavar='X', choices=["roles", "concepts", "all"], default="all", help="pattern type to show, valid choices: roles, concepts, all. Default: all")
     parser_patterns.set_defaults(func=run)
 
@@ -160,16 +160,19 @@ def select_entities(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     """
     
     # Determine what to query
-    tickers = [args.ticker] if args.ticker else None
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
+    tickers = [ticker] if ticker else None
     result = db.queries.entities.select(conn, tickers)
     if is_not_ok(result):
         return result
-    
+
     entities = result[1]
-    
+
     # Handle empty results
-    if not entities and args.ticker:
-        return err(f"cli.select.select_entities: ticker '{args.ticker}' not found in database")
+    if not entities and ticker:
+        return err(f"cli.select.select_entities: ticker '{ticker}' not found in database")
     
     # Apply column processing
     default_cols = ['cik', 'ticker', 'name']
@@ -189,14 +192,17 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
     """
 
     # Convert explicit ticker to CIKs if provided
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
     explicit_ciks = None
-    if args.ticker:
-        result = db.queries.entities.select(conn, [args.ticker])
+    if ticker:
+        result = db.queries.entities.select(conn, [ticker])
         if is_not_ok(result):
             return result
         entities = result[1]
         if not entities:
-            return err(f"cli.select.select_filings: ticker '{args.ticker}' not found in database")
+            return err(f"cli.select.select_filings: ticker '{ticker}' not found in database")
         explicit_ciks = [e['cik'] for e in entities]
 
     ciks = cli.shared.merge_stdin_field("cik", cmd["data"], explicit_ciks)
@@ -307,9 +313,12 @@ def _get_access_nos_for_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Resul
         return ok(access_nos)
     
     # Fallback to ticker-based lookup
-    if args.ticker:
-        return _get_access_nos_from_ticker(conn, args.ticker)
-    
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
+    if ticker:
+        return _get_access_nos_from_ticker(conn, ticker)
+
     # No data source available
     return err("cli.select.select_roles: no access numbers provided. Use --access, pipe filing data, or use --ticker.")
 
@@ -321,16 +330,19 @@ def _get_group_role_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result
     
     cik = None
     
-    # Try explicit ticker first
-    if args.ticker:
-        result = db.queries.entities.get(conn, ticker=args.ticker)
+    # Try explicit ticker first, then default ticker
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
+    if ticker:
+        result = db.queries.entities.get(conn, ticker=ticker)
         if is_not_ok(result):
             return result
-        
+
         entity = result[1]
         if not entity:
-            return err(f"cli.select._get_group_role_patterns: ticker '{args.ticker}' not found in database")
-        
+            return err(f"cli.select._get_group_role_patterns: ticker '{ticker}' not found in database")
+
         cik = entity["cik"]
     
     # Try to extract CIK from pipeline data
@@ -491,16 +503,24 @@ def _get_concept_source_from_filings_and_roles(conn: sqlite3.Connection, query_p
 
 def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) -> Result[list[dict], str]:
     """Extract concepts using ticker and group patterns (applies to all cached filings)."""
-    
+
     # 1. Resolve ticker to entity
-    result = db.queries.entities.get(conn, ticker=args.ticker)
+    # Priority 1: Explicit ticker from command line
+    # Priority 2: Default ticker from ft.toml
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
+    if not ticker:
+        return err("cli.select._get_concept_source_from_ticker_and_group: ticker required")
+
+    result = db.queries.entities.get(conn, ticker=ticker)
     if is_not_ok(result):
         return result
-    
+
     entity = result[1]
     if not entity:
-        return err(f"cli.select._get_concept_source_from_ticker_and_group: ticker '{args.ticker}' not found in database")
-    
+        return err(f"cli.select._get_concept_source_from_ticker_and_group: ticker '{ticker}' not found in database")
+
     cik = entity["cik"]
     
     # 2. Get group_id
@@ -519,7 +539,7 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
     
     role_patterns = result[1]
     if not role_patterns:
-        return err(f"cli.select._get_concept_source_from_ticker_and_group: group '{args.group}' has no role patterns defined for {args.ticker.upper()}.")
+        return err(f"cli.select._get_concept_source_from_ticker_and_group: group '{args.group}' has no role patterns defined for {ticker.upper()}.")
     
     # 4. Use dynamic concept matching to get all matching concepts
     search_field = "name" if args.label else "tag"
@@ -742,12 +762,18 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     """
 
     # Route to appropriate fetch strategy
+    # Priority 1: Explicit ticker from command line
+    # Priority 2: Default ticker from ft.toml
+    ticker = args.ticker if args.ticker else (
+        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+    )
+
     if args.uid:
         # UID-based lookup (concept patterns only)
-        result = _fetch_patterns_by_uid(conn, args.uid, args.type, args.ticker)
+        result = _fetch_patterns_by_uid(conn, args.uid, args.type, ticker)
     else:
         # General pattern selection (ticker and/or group optional)
-        result = _fetch_patterns_general(conn, args.ticker, args.group, args.type)
+        result = _fetch_patterns_general(conn, ticker, args.group, args.type)
 
     if is_not_ok(result):
         return result

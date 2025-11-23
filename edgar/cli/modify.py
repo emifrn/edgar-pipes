@@ -35,31 +35,31 @@ def add_arguments(subparsers):
     mode_group.add_argument("--remove-role", action="store_true", help="remove role patterns from group")
 
     # Pattern selection (for remove modes)
-    parser_group.add_argument("-u", "--uid", nargs="+", type=int, help="concept pattern user IDs to remove")
-    parser_group.add_argument("-n", "--names", nargs="+", help="pattern names to remove")
-    parser_group.add_argument("-t", "--ticker", help="ticker (required when using -u or -n)")
+    parser_group.add_argument("-u", "--uid", metavar="X", nargs="+", type=int, help="concept pattern user IDs to remove")
+    parser_group.add_argument("-n", "--names", metavar="X", nargs="+", help="pattern names to remove")
+    parser_group.add_argument("-t", "--ticker", metavar="X", help="ticker (required when using -u or -n)")
 
     parser_group.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_group.set_defaults(func=run)
     
     # modify role
     parser_role = modify_subparsers.add_parser("role", help="modify role pattern regex")
-    parser_role.add_argument("-n", "--name", help="pattern name to select pattern (for standalone mode)")
-    parser_role.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
-    parser_role.add_argument("--pattern", help="new regex pattern")
-    parser_role.add_argument("--new-name", dest="new_name", help="new pattern name")
-    parser_role.add_argument("--note", help="new or updated note describing the pattern rationale")
+    parser_role.add_argument("-n", "--name", metavar="X", help="pattern name to select pattern (for standalone mode)")
+    parser_role.add_argument("-t", "--ticker", metavar="X", help="ticker to narrow down pattern selection")
+    parser_role.add_argument("-p", "--pattern", metavar="X", help="new regex pattern")
+    parser_role.add_argument("--new-name", metavar="X", dest="new_name", help="new pattern name")
+    parser_role.add_argument("--note", metavar="X", help="new or updated note describing the pattern rationale")
     parser_role.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_role.set_defaults(func=run)
 
     # modify concept
     parser_concept = modify_subparsers.add_parser("concept", help="modify concept name and/or pattern")
-    parser_concept.add_argument("-u", "--uid", type=int, help="user ID to select pattern (for standalone mode)")
-    parser_concept.add_argument("-t", "--ticker", help="ticker to narrow down pattern selection")
-    parser_concept.add_argument("-n", "--name", help="new concept name")
-    parser_concept.add_argument("--pattern", help="new regex pattern")
-    parser_concept.add_argument("--new-uid", type=int, dest="new_uid", help="new user-assigned ID")
-    parser_concept.add_argument("--note", help="new or updated note describing the pattern rationale")
+    parser_concept.add_argument("-u", "--uid", metavar="X", type=int, help="user ID to select pattern (for standalone mode)")
+    parser_concept.add_argument("-t", "--ticker", metavar="X", help="ticker to narrow down pattern selection")
+    parser_concept.add_argument("-n", "--name", metavar="X", help="new concept name")
+    parser_concept.add_argument("-p", "--pattern", metavar="X", help="new regex pattern")
+    parser_concept.add_argument("--new-uid", metavar="X", type=int, dest="new_uid", help="new user-assigned ID")
+    parser_concept.add_argument("--note", metavar="X", help="new or updated note describing the pattern rationale")
     parser_concept.add_argument("-y", "--yes", action="store_true", help="execute modification (default: preview)")
     parser_concept.set_defaults(func=run)
 
@@ -169,24 +169,29 @@ def _remove_concepts_from_group(conn: sqlite3.Connection, args, group_id: int) -
     """Remove concept patterns from group."""
 
     try:
+        # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+
         # Validate ticker is provided if using uid/names
-        if (args.uid or args.names) and not args.ticker:
+        if (args.uid or args.names) and not ticker:
             conn.close()
-            return err("modify group --remove-concept: --ticker is required when using -u or -n")
+            return err("modify group --remove-concept: --ticker is required when using -u or -n. Use --ticker or set default ticker in ft.toml.")
 
         # Get patterns to remove
         patterns = []
 
         if args.uid:
             # Fetch by uid
-            result = db.queries.entities.get(conn, ticker=args.ticker)
+            result = db.queries.entities.get(conn, ticker=ticker)
             if is_not_ok(result):
                 conn.close()
                 return result
             entity = result[1]
             if not entity:
                 conn.close()
-                return err(f"modify group: ticker '{args.ticker}' not found")
+                return err(f"modify group: ticker '{ticker}' not found")
             cik = entity["cik"]
 
             for uid in args.uid:
@@ -197,19 +202,19 @@ def _remove_concepts_from_group(conn: sqlite3.Connection, args, group_id: int) -
                 pattern = result[1]
                 if not pattern:
                     conn.close()
-                    return err(f"modify group: concept pattern with uid={uid} for {args.ticker} not found")
+                    return err(f"modify group: concept pattern with uid={uid} for {ticker} not found")
                 patterns.append(pattern)
 
         elif args.names:
             # Fetch by name
-            result = db.queries.entities.get(conn, ticker=args.ticker)
+            result = db.queries.entities.get(conn, ticker=ticker)
             if is_not_ok(result):
                 conn.close()
                 return result
             entity = result[1]
             if not entity:
                 conn.close()
-                return err(f"modify group: ticker '{args.ticker}' not found")
+                return err(f"modify group: ticker '{ticker}' not found")
             cik = entity["cik"]
 
             for name in args.names:
@@ -220,7 +225,7 @@ def _remove_concepts_from_group(conn: sqlite3.Connection, args, group_id: int) -
                 pattern = result[1]
                 if not pattern:
                     conn.close()
-                    return err(f"modify group: concept pattern '{name}' for {args.ticker} not found")
+                    return err(f"modify group: concept pattern '{name}' for {ticker} not found")
                 patterns.append(pattern)
 
         else:
@@ -246,24 +251,29 @@ def _remove_roles_from_group(conn: sqlite3.Connection, args, group_id: int) -> R
     """Remove role patterns from group."""
 
     try:
+        # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
+        ticker = args.ticker if args.ticker else (
+            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        )
+
         # Validate ticker is provided if using names
-        if args.names and not args.ticker:
+        if args.names and not ticker:
             conn.close()
-            return err("modify group --remove-role: --ticker is required when using -n")
+            return err("modify group --remove-role: --ticker is required when using -n. Use --ticker or set default ticker in ft.toml.")
 
         # Get patterns to remove
         patterns = []
 
         if args.names:
             # Fetch by name
-            result = db.queries.entities.get(conn, ticker=args.ticker)
+            result = db.queries.entities.get(conn, ticker=ticker)
             if is_not_ok(result):
                 conn.close()
                 return result
             entity = result[1]
             if not entity:
                 conn.close()
-                return err(f"modify group: ticker '{args.ticker}' not found")
+                return err(f"modify group: ticker '{ticker}' not found")
             cik = entity["cik"]
 
             for name in args.names:
@@ -274,7 +284,7 @@ def _remove_roles_from_group(conn: sqlite3.Connection, args, group_id: int) -> R
                 pattern = result[1]
                 if not pattern:
                     conn.close()
-                    return err(f"modify group: role pattern '{name}' for {args.ticker} not found")
+                    return err(f"modify group: role pattern '{name}' for {ticker} not found")
                 patterns.append(pattern)
 
         else:
@@ -322,15 +332,21 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
         if args.name:
             # Standalone mode: fetch pattern by name
             cik = None
-            if args.ticker:
-                result = db.queries.entities.get(conn, ticker=args.ticker)
+
+            # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
+            ticker = args.ticker if args.ticker else (
+                args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            )
+
+            if ticker:
+                result = db.queries.entities.get(conn, ticker=ticker)
                 if is_not_ok(result):
                     conn.close()
                     return result
                 entity = result[1]
                 if not entity:
                     conn.close()
-                    return err(f"modify role: ticker '{args.ticker}' not found")
+                    return err(f"modify role: ticker '{ticker}' not found")
                 cik = entity["cik"]
 
             result = db.queries.role_patterns.get_with_entity(conn, cik, args.name)
@@ -340,7 +356,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
             pattern = result[1]
             if not pattern:
                 conn.close()
-                ticker_msg = f" for {args.ticker}" if args.ticker else ""
+                ticker_msg = f" for {ticker}" if ticker else ""
                 return err(f"modify role: pattern with name '{args.name}'{ticker_msg} not found")
             patterns = [pattern]
         elif cmd["data"]:
@@ -397,15 +413,21 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
         if args.uid:
             # Standalone mode: fetch pattern by user ID
             cik = None
-            if args.ticker:
-                result = db.queries.entities.get(conn, ticker=args.ticker)
+
+            # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
+            ticker = args.ticker if args.ticker else (
+                args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            )
+
+            if ticker:
+                result = db.queries.entities.get(conn, ticker=ticker)
                 if is_not_ok(result):
                     conn.close()
                     return result
                 entity = result[1]
                 if not entity:
                     conn.close()
-                    return err(f"modify concept: ticker '{args.ticker}' not found")
+                    return err(f"modify concept: ticker '{ticker}' not found")
                 cik = entity["cik"]
 
             result = db.queries.concept_patterns.get_with_entity(conn, cik, str(args.uid))
@@ -415,7 +437,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
             pattern = result[1]
             if not pattern:
                 conn.close()
-                ticker_msg = f" for {args.ticker}" if args.ticker else ""
+                ticker_msg = f" for {ticker}" if ticker else ""
                 return err(f"modify concept: pattern with user ID {args.uid}{ticker_msg} not found")
             patterns = [pattern]
         elif cmd["data"]:
