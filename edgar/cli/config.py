@@ -65,7 +65,7 @@ def run_show(cmd: Cmd, args) -> Result[None, str]:
         if journal_files:
             journal_info = f" ({len(journal_files)} journal(s))"
 
-    # Get .ft.toml location
+    # Get ft.toml location
     ft_config_path = cfg.find_workspace_config(workspace_root)
     ft_status = "✓" if ft_config_path else "✗ (not found)"
 
@@ -105,7 +105,7 @@ def run_show_env(cmd: Cmd, args) -> Result[None, str]:
     # Print environment variables
     print("\nEnvironment Variables", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
-    print("\nNote: Database and journal paths are now configured via .ft.toml", file=sys.stderr)
+    print("\nNote: Database and journal paths are now configured via ft.toml", file=sys.stderr)
     print("      (not environment variables)\n", file=sys.stderr)
     for var_name, var_value in env_vars.items():
         if var_value:

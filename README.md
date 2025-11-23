@@ -183,14 +183,14 @@ nano ~/.config/edgar-pipes/config.toml
 
 ### Working with Workspaces
 
-edgar-pipes uses workspaces to organize your analysis. A workspace is configured via a `.ft.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
+edgar-pipes uses workspaces to organize your analysis. A workspace is configured via a `ft.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
 
 ```bash
 # Create workspace directory
 mkdir aapl && cd aapl
 
-# Create .ft.toml configuration
-cat > .ft.toml <<EOF
+# Create ft.toml configuration
+cat > ft.toml <<EOF
 [workspace]
 ticker = "AAPL"  # Optional: default ticker
 
@@ -199,7 +199,7 @@ database = "store.db"
 journals = "journals"
 EOF
 
-# Start working - edgar-pipes finds .ft.toml automatically
+# Start working - edgar-pipes finds ft.toml automatically
 ep probe filings -t AAPL  # Creates store.db
 ep -j new role -t AAPL -n balance -p 'PATTERN'  # Creates journals/default.jsonl
 ```
@@ -207,7 +207,7 @@ ep -j new role -t AAPL -n balance -p 'PATTERN'  # Creates journals/default.jsonl
 Typical directory structure:
 ```
 aapl/
-  .ft.toml          # Workspace configuration
+  ft.toml          # Workspace configuration
   store.db          # SQLite database
   journals/         # Journal files
     default.jsonl
@@ -215,11 +215,11 @@ aapl/
 ```
 
 **Key features:**
-- Paths in `.ft.toml` are relative to the `.ft.toml` file location
-- edgar-pipes finds `.ft.toml` by walking up from current directory
+- Paths in `ft.toml` are relative to the `ft.toml` file location
+- edgar-pipes finds `ft.toml` by walking up from current directory
 - Workspace root propagates through pipelines automatically
 - Optional default ticker simplifies repetitive commands
-- `.ft.toml` can be version-controlled for reproducible workflows
+- `ft.toml` can be version-controlled for reproducible workflows
 
 ### Workflows
 
@@ -377,7 +377,7 @@ ep journal replay setup       # Replay setup journal
 ep journal replay setup 5:10,13,15,18:22
 ep journal replay daily 1,5,8
 
-# Replay from different workspace (cd to it first - .ft.toml is auto-discovered)
+# Replay from different workspace (cd to it first - ft.toml is auto-discovered)
 cd ~/aapl
 ep journal replay setup
 ```

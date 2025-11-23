@@ -384,8 +384,8 @@ ep select filings -t TICKER | ep select roles -g GROUP | ep select concepts -p '
 # Create workspace directory
 mkdir aapl && cd aapl
 
-# Create .ft.toml configuration
-cat > .ft.toml <<EOF
+# Create ft.toml configuration
+cat > ft.toml <<EOF
 [workspace]
 ticker = "AAPL"  # Optional default ticker
 
@@ -394,7 +394,7 @@ database = "store.db"
 journals = "journals"
 EOF
 
-# Start working - edgar-pipes finds .ft.toml automatically
+# Start working - edgar-pipes finds ft.toml automatically
 ep probe filings -t AAPL
 ep -j setup new group Balance
 
@@ -409,14 +409,14 @@ ep report -t AAPL -g Balance  # Still finds ../. ft.toml
 # Build system paradigm: separate source/build/output
 mkdir company && cd company
 
-# Create .ft.toml with custom paths
-cat > .ft.toml <<EOF
+# Create ft.toml with custom paths
+cat > ft.toml <<EOF
 [workspace]
 ticker = "AAPL"
 name = "Apple Inc."
 
 [edgar-pipes]
-database = "db/edgar.db"      # Paths relative to .ft.toml
+database = "db/edgar.db"      # Paths relative to ft.toml
 journals = "src/journals"
 EOF
 
@@ -496,11 +496,11 @@ ep config show
 # User configuration file location (identity, theme)
 ~/.config/edgar-pipes/config.toml
 
-# Workspace configuration (.ft.toml - auto-discovered)
+# Workspace configuration (ft.toml - auto-discovered)
 # edgar-pipes walks up directory tree to find this file
 workspace/
-  ├── .ft.toml              # Workspace configuration
-  ├── store.db              # SQLite database (path from .ft.toml)
+  ├── ft.toml              # Workspace configuration
+  ├── store.db              # SQLite database (path from ft.toml)
   └── journals/
       ├── default.jsonl     # Default journal (ep -j)
       └── setup.jsonl       # Named journal (ep -j setup)

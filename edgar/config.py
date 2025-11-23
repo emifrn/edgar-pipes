@@ -36,7 +36,7 @@ def load_config() -> dict[str, Any]:
     2. Config file (~/.config/edgar-pipes/config.toml)
     3. Built-in defaults (lowest)
 
-    Note: Workspace paths (database, journals) come from .ft.toml, not this config.
+    Note: Workspace paths (database, journals) come from ft.toml, not this config.
     """
     # Start with defaults
     config = {
@@ -119,13 +119,13 @@ theme = "nobox-minimal"
 
 def find_workspace_config(start_dir: Path | None = None) -> Path | None:
     """
-    Find .ft.toml by walking up directory tree from start_dir.
+    Find ft.toml by walking up directory tree from start_dir.
 
     Args:
         start_dir: Directory to start search from (default: current directory)
 
     Returns:
-        Path to .ft.toml file if found, None otherwise
+        Path to ft.toml file if found, None otherwise
     """
     if start_dir is None:
         start_dir = Path.cwd()
@@ -134,7 +134,7 @@ def find_workspace_config(start_dir: Path | None = None) -> Path | None:
 
     # Walk up directory tree
     while True:
-        ft_config = current / ".ft.toml"
+        ft_config = current / "ft.toml"
         if ft_config.exists():
             return ft_config
 
@@ -149,7 +149,7 @@ def find_workspace_config(start_dir: Path | None = None) -> Path | None:
 
 def load_workspace_config(context_workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
     """
-    Load workspace configuration from .ft.toml file.
+    Load workspace configuration from ft.toml file.
 
     Args:
         context_workspace: Workspace path from pipeline context (if available)
@@ -158,9 +158,9 @@ def load_workspace_config(context_workspace: str | None = None) -> tuple[Path, d
         Tuple of (workspace_root, workspace_config)
 
     Raises:
-        RuntimeError: If no .ft.toml file found
+        RuntimeError: If no ft.toml file found
     """
-    # If context provides workspace, use that directory to find .ft.toml
+    # If context provides workspace, use that directory to find ft.toml
     if context_workspace:
         start_dir = Path(context_workspace)
     else:
@@ -169,11 +169,11 @@ def load_workspace_config(context_workspace: str | None = None) -> tuple[Path, d
     ft_config_path = find_workspace_config(start_dir)
 
     if ft_config_path is None:
-        error_msg = f"""No .ft.toml workspace configuration found.
+        error_msg = f"""No ft.toml workspace configuration found.
 
 Searched from: {start_dir}
 
-Create a .ft.toml file in your workspace directory:
+Create a ft.toml file in your workspace directory:
 
 [workspace]
 ticker = "AAPL"  # Optional: default ticker
@@ -202,7 +202,7 @@ See https://github.com/emifrn/edgar-pipes for more information."""
     if "journals" not in ep_config:
         raise RuntimeError(f"{ft_config_path}: Missing required 'journals' in [edgar-pipes] section")
 
-    # Workspace root is the directory containing .ft.toml
+    # Workspace root is the directory containing ft.toml
     workspace_root = ft_config_path.parent
 
     return workspace_root, workspace_config
@@ -213,7 +213,7 @@ def get_db_path(workspace_root: Path, workspace_config: dict[str, Any]) -> Path:
     Get database file path from workspace configuration.
 
     Args:
-        workspace_root: Directory containing .ft.toml
+        workspace_root: Directory containing ft.toml
         workspace_config: Loaded workspace configuration
 
     Returns:
@@ -228,7 +228,7 @@ def get_journal_path(workspace_root: Path, workspace_config: dict[str, Any], jou
     Get journal file path from workspace configuration.
 
     Args:
-        workspace_root: Directory containing .ft.toml
+        workspace_root: Directory containing ft.toml
         workspace_config: Loaded workspace configuration
         journal_name: Journal name (e.g., "default", "setup", "daily")
 

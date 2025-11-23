@@ -1,4 +1,4 @@
-# ADR 006: .ft.toml Workspace Configuration
+# ADR 006: ft.toml Workspace Configuration
 
 ## Context
 
@@ -26,9 +26,9 @@ AI agents and scripts couldn't rely on environment variables persisting across t
 
 ## Decision
 
-Replace `-w/--ws` flag and `EDGAR_PIPES_DB_PATH`/`EDGAR_PIPES_JOURNALS` environment variables with `.ft.toml` workspace configuration file.
+Replace `-w/--ws` flag and `EDGAR_PIPES_DB_PATH`/`EDGAR_PIPES_JOURNALS` environment variables with `ft.toml` workspace configuration file.
 
-### .ft.toml Format
+### ft.toml Format
 
 ```toml
 [workspace]
@@ -36,17 +36,17 @@ ticker = "AAPL"  # Optional default ticker
 name = "Apple Inc."
 
 [edgar-pipes]
-database = "store.db"      # Path relative to .ft.toml
-journals = "journals"      # Path relative to .ft.toml
+database = "store.db"      # Path relative to ft.toml
+journals = "journals"      # Path relative to ft.toml
 ```
 
 ### Discovery Mechanism
 
-Edgar-pipes discovers `.ft.toml` by walking up the directory tree from the current working directory, similar to how git finds `.git`:
+Edgar-pipes discovers `ft.toml` by walking up the directory tree from the current working directory, similar to how git finds `.git`:
 
-1. Check current directory for `.ft.toml`
+1. Check current directory for `ft.toml`
 2. If not found, check parent directory
-3. Repeat until `.ft.toml` found or filesystem root reached
+3. Repeat until `ft.toml` found or filesystem root reached
 4. Raise helpful error if not found
 
 This enables running `ep` commands from any subdirectory within a workspace.
@@ -55,7 +55,7 @@ This enables running `ep` commands from any subdirectory within a workspace.
 
 1. Command-line arguments (e.g., `-t AAPL`) - highest priority
 2. Pipeline context (propagated from previous command)
-3. `.ft.toml` workspace defaults (optional ticker)
+3. `ft.toml` workspace defaults (optional ticker)
 4. Error if required value not found
 
 ### Key Changes
@@ -63,30 +63,30 @@ This enables running `ep` commands from any subdirectory within a workspace.
 - **Removed**: `-w/--ws` flag
 - **Removed**: `EDGAR_PIPES_DB_PATH` environment variable
 - **Removed**: `EDGAR_PIPES_JOURNALS` environment variable
-- **Added**: `.ft.toml` configuration file with auto-discovery
+- **Added**: `ft.toml` configuration file with auto-discovery
 - **Added**: Optional default ticker in `[workspace]` section
 - **Retained**: User configuration in `~/.config/edgar-pipes/config.toml` (identity, theme)
 - **Retained**: Workspace root propagation through pipeline context
 
 ### Context Propagation
 
-Workspace root (directory containing `.ft.toml`) propagates through pipeline:
+Workspace root (directory containing `ft.toml`) propagates through pipeline:
 
 ```bash
 cd /path/to/aapl
 ep select filings -t AAPL | ep select roles -g Balance
 
-# First command discovers .ft.toml, adds workspace_root to context
-# Second command reads workspace_root from context, loads same .ft.toml
+# First command discovers ft.toml, adds workspace_root to context
+# Second command reads workspace_root from context, loads same ft.toml
 ```
 
 ## Consequences
 
 ### Positive
 
-- **Configuration persists**: `.ft.toml` file always available, no environment variable issues
+- **Configuration persists**: `ft.toml` file always available, no environment variable issues
 - **Discoverable**: Works from any subdirectory (like git)
-- **Version controllable**: `.ft.toml` can be committed to track workspace configuration
+- **Version controllable**: `ft.toml` can be committed to track workspace configuration
 - **Flexible layouts**: Easy to separate source/build/output directories
 - **Cleaner interface**: No flags or env vars needed for workspace selection
 - **Self-documenting**: Opening a workspace immediately shows configuration
@@ -95,9 +95,9 @@ ep select filings -t AAPL | ep select roles -g Balance
 
 ### Negative
 
-- **Breaking change**: v0.2.1 users must create `.ft.toml` files
+- **Breaking change**: v0.2.1 users must create `ft.toml` files
 - **No backward compatibility**: Clean break from `-w` flag and environment variables
-- **Migration burden**: All existing workspaces need `.ft.toml` files created
+- **Migration burden**: All existing workspaces need `ft.toml` files created
 - **File proliferation**: One more dotfile in project directories
 
 ## Examples
@@ -117,12 +117,12 @@ ep -w ~/projects/aapl probe filings -t AAPL
 # Had to repeat for every command invocation (didn't persist)
 ```
 
-### After (v0.3.0 with .ft.toml)
+### After (v0.3.0 with ft.toml)
 
 ```bash
 # Simple workspace
 mkdir aapl && cd aapl
-cat > .ft.toml <<EOF
+cat > ft.toml <<EOF
 [workspace]
 ticker = "AAPL"
 
@@ -131,11 +131,11 @@ database = "store.db"
 journals = "journals"
 EOF
 
-ep probe filings -t AAPL  # Auto-discovers .ft.toml
+ep probe filings -t AAPL  # Auto-discovers ft.toml
 
 # Custom layout
 mkdir company && cd company
-cat > .ft.toml <<EOF
+cat > ft.toml <<EOF
 [workspace]
 ticker = "BKE"
 name = "Buckle Inc."
@@ -147,7 +147,7 @@ EOF
 
 # Works from anywhere in the tree
 cd data/analysis/scripts
-ep report -t BKE -g Balance  # Finds ../../../.ft.toml automatically
+ep report -t BKE -g Balance  # Finds ../../../ft.toml automatically
 ```
 
 ### Build System Integration
@@ -167,7 +167,7 @@ $(BUILD_DIR)/%.tsv:
 	ep report -t BKE -g Balance > $@
 ```
 
-The `.ft.toml` configuration makes the Makefile dramatically simpler.
+The `ft.toml` configuration makes the Makefile dramatically simpler.
 
 ## Migration Guide
 
@@ -180,9 +180,9 @@ The `.ft.toml` configuration makes the Makefile dramatically simpler.
   └── journals/
       └── default.jsonl
 
-# Create .ft.toml
+# Create ft.toml
 cd ~/workspaces/aapl
-cat > .ft.toml <<EOF
+cat > ft.toml <<EOF
 [workspace]
 ticker = "AAPL"
 
@@ -207,12 +207,12 @@ This decision completes the workspace evolution:
 2. **v0.2.0 (ADR 005)**: Workspace concept with `-w` flag and optional env vars
 3. **v0.3.0 (ADR 006)**: Configuration file with auto-discovery
 
-The `.ft.toml` approach draws inspiration from:
+The `ft.toml` approach draws inspiration from:
 - **Git**: `.git` directory discovery by walking up tree
 - **Cargo**: `Cargo.toml` in project root
 - **Poetry**: `pyproject.toml` in project root
 - **EditorConfig**: `.editorconfig` file discovery
 
-The name `.ft.toml` signals "financial-terminal" workspace configuration, making it clear this is a workspace configuration file, not a general edgar-pipes config.
+The name `ft.toml` signals "financial-terminal" workspace configuration, making it clear this is a workspace configuration file, not a general edgar-pipes config.
 
 This model makes edgar-pipes behave like other modern project-based tools where configuration lives with the project, not in environment variables or flags.

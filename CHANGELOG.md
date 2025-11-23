@@ -9,27 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### ⚠️ Breaking Changes
 
-**Workspace Configuration via .ft.toml**
+**Workspace Configuration via ft.toml**
 - Removed `-w / --ws` workspace flag
 - Removed `EDGAR_PIPES_DB_PATH` environment variable
 - Removed `EDGAR_PIPES_JOURNALS` environment variable
-- Added `.ft.toml` workspace configuration file
-- `ep` now searches for `.ft.toml` by walking up directory tree from current directory
+- Added `ft.toml` workspace configuration file
+- `ep` now searches for `ft.toml` by walking up directory tree from current directory
 
 **Why this change:**
-Environment variables don't persist across separate command invocations (problematic for AI agents and scripts). The `-w` flag was awkward and didn't support flexible project layouts. The new `.ft.toml` model provides a single, discoverable, version-controllable configuration file that naturally supports both simple and complex project structures.
+Environment variables don't persist across separate command invocations (problematic for AI agents and scripts). The `-w` flag was awkward and didn't support flexible project layouts. The new `ft.toml` model provides a single, discoverable, version-controllable configuration file that naturally supports both simple and complex project structures.
 
 ### Added
 
-**`.ft.toml` Workspace Configuration**
-- Workspace discovery: walks up directory tree to find `.ft.toml`
+**`ft.toml` Workspace Configuration**
+- Workspace discovery: walks up directory tree to find `ft.toml`
 - Supports custom project layouts (separate `db/`, `src/journals/`, `output/` directories)
 - Optional default ticker setting in `[workspace]` section
-- Clear error messages when `.ft.toml` not found
+- Clear error messages when `ft.toml` not found
 - Full TOML format with validation
 
 **Default Ticker Support**
-- Optional `ticker = "AAPL"` in `[workspace]` section of `.ft.toml`
+- Optional `ticker = "AAPL"` in `[workspace]` section of `ft.toml`
 - Lowest priority (command-line and pipeline context override)
 - Simplifies repetitive commands in single-company workspaces
 
@@ -38,11 +38,11 @@ Environment variables don't persist across separate command invocations (problem
 **Configuration Precedence** (from highest to lowest):
 1. Command-line arguments (e.g., `-t AAPL`)
 2. Pipeline context (propagated from previous command)
-3. `.ft.toml` workspace defaults
+3. `ft.toml` workspace defaults
 4. Error if required value not found
 
 **Pipeline Context Propagation:**
-- Workspace root (directory containing `.ft.toml`) propagates through pipelines
+- Workspace root (directory containing `ft.toml`) propagates through pipelines
 - Only the first command needs to be in a workspace directory
 - Subsequent piped commands inherit workspace automatically
 
@@ -50,12 +50,12 @@ Environment variables don't persist across separate command invocations (problem
 
 **From v0.2.1 to v0.3.0:**
 
-Create `.ft.toml` in your workspace:
+Create `ft.toml` in your workspace:
 
 ```bash
 # Simple workspace (database and journals in same directory)
 cd aapl
-cat > .ft.toml <<EOF
+cat > ft.toml <<EOF
 [edgar-pipes]
 database = "store.db"
 journals = "journals"
@@ -63,7 +63,7 @@ EOF
 
 # Build-system workspace (separated source/build/output)
 cd financial-terminal/bke
-cat > .ft.toml <<EOF
+cat > ft.toml <<EOF
 [workspace]
 ticker = "BKE"
 
@@ -83,7 +83,7 @@ ep -w ~/projects/aapl probe filings -t AAPL
 **New commands (v0.3.0):**
 ```bash
 cd ~/projects/aapl
-ep probe filings -t AAPL  # Finds .ft.toml automatically
+ep probe filings -t AAPL  # Finds ft.toml automatically
 ```
 
 ## [0.2.1] - 2025-11-17

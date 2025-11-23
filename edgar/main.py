@@ -91,7 +91,7 @@ def cli_main(args):
         # Extract packet and context
         input_packet, input_context = stdin_result[1]
 
-        # Load workspace configuration from .ft.toml
+        # Load workspace configuration from ft.toml
         try:
             workspace_root, workspace_config = config.load_workspace_config(
                 input_context.get("workspace")
@@ -234,15 +234,15 @@ Environment variables:
 
 Configuration:
   User config: ~/.config/edgar-pipes/config.toml (user agent, theme)
-  Workspace config: .ft.toml (database, journals, default ticker)
+  Workspace config: ft.toml (database, journals, default ticker)
 
   Use "ep config show" to view configuration
   Use "ep config env" to view environment variables
 
-Workspace (.ft.toml):
-  edgar-pipes finds .ft.toml by walking up from current directory
+Workspace (ft.toml):
+  edgar-pipes finds ft.toml by walking up from current directory
 
-  Create .ft.toml in your workspace:
+  Create ft.toml in your workspace:
 
   [workspace]
   ticker = "AAPL"  # Optional: default ticker
@@ -252,9 +252,9 @@ Workspace (.ft.toml):
   journals = "src/journals"
 
 Examples:
-  # Create workspace and .ft.toml
+  # Create workspace and ft.toml
   mkdir aapl && cd aapl
-  cat > .ft.toml <<EOF
+  cat > ft.toml <<EOF
   [edgar-pipes]
   database = "store.db"
   journals = "journals"

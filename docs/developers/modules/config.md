@@ -2,7 +2,7 @@
 
 The configuration system provides two-tier configuration management:
 1. **User configuration** - Identity and preferences (~/.config/edgar-pipes/config.toml)
-2. **Workspace configuration** - Database and journal paths (.ft.toml)
+2. **Workspace configuration** - Database and journal paths (ft.toml)
 
 ## config.py - Configuration management
 
@@ -13,9 +13,9 @@ The configuration system provides two-tier configuration management:
 - Output theme preference
 - XDG-compliant location
 
-**Workspace config** (.ft.toml):
-- Database path (relative to .ft.toml)
-- Journals directory (relative to .ft.toml)
+**Workspace config** (ft.toml):
+- Database path (relative to ft.toml)
+- Journals directory (relative to ft.toml)
 - Optional default ticker
 - Auto-discovered by walking up directory tree
 
@@ -40,8 +40,8 @@ ticker = "AAPL"  # Optional default ticker
 name = "Apple Inc."
 
 [edgar-pipes]
-database = "store.db"      # Path relative to .ft.toml
-journals = "journals"      # Path relative to .ft.toml
+database = "store.db"      # Path relative to ft.toml
+journals = "journals"      # Path relative to ft.toml
 ```
 
 ### Core functions
@@ -60,12 +60,12 @@ Environment variable mappings:
 
 **find_workspace_config(start_dir: Path | None = None) -> Path | None**
 
-Discovers .ft.toml by walking up directory tree:
+Discovers ft.toml by walking up directory tree:
 1. Starts from `start_dir` (defaults to current working directory)
-2. Checks for `.ft.toml` in current directory
+2. Checks for `ft.toml` in current directory
 3. Walks up to parent directory
-4. Repeats until `.ft.toml` found or filesystem root reached
-5. Returns Path to `.ft.toml` or None
+4. Repeats until `ft.toml` found or filesystem root reached
+5. Returns Path to `ft.toml` or None
 
 Similar to how git finds `.git` directory.
 
@@ -73,8 +73,8 @@ Similar to how git finds `.git` directory.
 
 Loads workspace configuration:
 1. If `context_workspace` provided (from pipeline), use it as workspace root
-2. Otherwise, call `find_workspace_config()` to discover `.ft.toml`
-3. Raises error with helpful message if `.ft.toml` not found
+2. Otherwise, call `find_workspace_config()` to discover `ft.toml`
+3. Raises error with helpful message if `ft.toml` not found
 4. Loads TOML file and validates structure
 5. Returns `(workspace_root, workspace_config)` tuple
 
@@ -93,7 +93,7 @@ Resolves database path from workspace configuration:
 
 Example:
 ```python
-# .ft.toml contains: database = "db/edgar.db"
+# ft.toml contains: database = "db/edgar.db"
 # workspace_root = /home/user/aapl
 # Returns: /home/user/aapl/db/edgar.db
 ```
@@ -108,7 +108,7 @@ Resolves journal file path:
 
 Example:
 ```python
-# .ft.toml contains: journals = "src/journals"
+# ft.toml contains: journals = "src/journals"
 # workspace_root = /home/user/aapl
 # journal_name = "setup"
 # Returns: /home/user/aapl/src/journals/setup.jsonl
@@ -148,7 +148,7 @@ Called from main.py when default user-agent is detected.
 ```bash
 # Directory structure:
 /home/user/projects/aapl/
-  .ft.toml
+  ft.toml
   db/
     edgar.db
   src/
@@ -162,10 +162,10 @@ cd /home/user/projects/aapl/analysis/scripts
 ep report -t AAPL -g Balance
 
 # find_workspace_config() walks up:
-# 1. Check /home/user/projects/aapl/analysis/scripts/.ft.toml (not found)
-# 2. Check /home/user/projects/aapl/analysis/.ft.toml (not found)
-# 3. Check /home/user/projects/aapl/.ft.toml (found!)
-# Returns: /home/user/projects/aapl/.ft.toml
+# 1. Check /home/user/projects/aapl/analysis/scripts/ft.toml (not found)
+# 2. Check /home/user/projects/aapl/analysis/ft.toml (not found)
+# 3. Check /home/user/projects/aapl/ft.toml (found!)
+# Returns: /home/user/projects/aapl/ft.toml
 ```
 
 ### Pipeline context propagation
@@ -178,7 +178,7 @@ cd /home/user/projects/aapl
 ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
 
 # First command (select filings):
-# - Discovers .ft.toml in current directory
+# - Discovers ft.toml in current directory
 # - Loads workspace config
 # - Adds workspace_root to output context
 
@@ -192,7 +192,7 @@ ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
 ```
 
 This ensures the entire pipeline operates on the same workspace even if
-subsequent commands don't explicitly know where the .ft.toml is located.
+subsequent commands don't explicitly know where the ft.toml is located.
 
 ### First-run experience
 
@@ -209,7 +209,7 @@ When edgar-pipes runs for the first time:
 If user skips interactive setup (empty input), they'll be prompted again on
 next run. The default user-agent is a signal that configuration is needed.
 
-For workspace configuration, users must create .ft.toml manually or copy from
+For workspace configuration, users must create ft.toml manually or copy from
 a template. See examples in README.md and CHEATSHEET.md.
 
 ## cli/config.py - Config command
@@ -227,13 +227,13 @@ Shows two sections:
    - User agent string
    - Output theme
 
-2. **Workspace Configuration** (.ft.toml):
+2. **Workspace Configuration** (ft.toml):
    - Workspace root directory
    - Database path and size (if exists)
    - Journals directory
    - Default ticker (if configured)
 
-If no workspace found, displays message: "No workspace found (.ft.toml not found in current directory tree)"
+If no workspace found, displays message: "No workspace found (ft.toml not found in current directory tree)"
 
 **ep config env** - Display environment variables
 
@@ -291,9 +291,9 @@ User Configuration: ~/.config/edgar-pipes/config.toml ✓
 Workspace Configuration
 ==================================================
 
-No workspace found (.ft.toml not found in current directory tree)
+No workspace found (ft.toml not found in current directory tree)
 
-To create a workspace, create a .ft.toml file:
+To create a workspace, create a ft.toml file:
 
   [workspace]
   ticker = "AAPL"  # Optional
@@ -316,7 +316,7 @@ To create a workspace, create a .ft.toml file:
    - Resolves and displays database path with size
    - Resolves and displays journals path with file count
 5. If no workspace:
-   - Shows helpful message with example .ft.toml
+   - Shows helpful message with example ft.toml
 
 **run_show_env(cmd, args)** - Show environment variables handler
 
@@ -351,7 +351,7 @@ overrides.
 
 ### Workspace config file
 
-The workspace config file uses TOML format (.ft.toml in workspace root):
+The workspace config file uses TOML format (ft.toml in workspace root):
 
 ```toml
 # Financial Terminal Workspace Configuration
@@ -362,7 +362,7 @@ ticker = "AAPL"
 name = "Apple Inc."
 
 [edgar-pipes]
-# Paths relative to this .ft.toml file
+# Paths relative to this ft.toml file
 database = "store.db"
 journals = "journals"
 ```
@@ -385,7 +385,7 @@ User configuration follows XDG Base Directory specification:
 
 - **Config**: `$XDG_CONFIG_HOME/edgar-pipes/` (default: ~/.config/edgar-pipes/)
 
-Workspace configuration uses .ft.toml files in project directories, similar
+Workspace configuration uses ft.toml files in project directories, similar
 to how version control systems use .git directories.
 
 This ensures edgar-pipes plays nicely with other Linux/Unix applications and
@@ -398,7 +398,7 @@ Version 0.3.0 removed:
 - `EDGAR_PIPES_DB_PATH` environment variable
 - `EDGAR_PIPES_JOURNALS` environment variable
 
-Users must create `.ft.toml` files in their workspace directories:
+Users must create `ft.toml` files in their workspace directories:
 
 ```bash
 # Old (v0.2.1)
@@ -408,8 +408,8 @@ ep -w ~/projects/aapl probe filings -t AAPL
 
 # New (v0.3.0)
 cd ~/projects/aapl
-# Create .ft.toml with database and journals paths
-ep probe filings -t AAPL  # Auto-discovers .ft.toml
+# Create ft.toml with database and journals paths
+ep probe filings -t AAPL  # Auto-discovers ft.toml
 ```
 
 See CHANGELOG.md for complete migration guide.
