@@ -770,8 +770,14 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
         return result
     patterns, valid_cols = result[1]
 
-    # Rebuild rows with only display columns (exclude internal pid)
-    display_patterns = [{col: row[col] for col in valid_cols if col in row} for row in patterns]
+    # Rebuild rows with display columns but keep pid for delete command
+    display_patterns = []
+    for row in patterns:
+        display_row = {col: row[col] for col in valid_cols if col in row}
+        # Always include pid for delete command even if not in display cols
+        if 'pid' in row:
+            display_row['pid'] = row['pid']
+        display_patterns.append(display_row)
 
     return ok({"name": "patterns", "data": display_patterns})
 
