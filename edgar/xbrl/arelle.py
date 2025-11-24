@@ -93,6 +93,7 @@ def extract_concepts_by_role(model: ModelXbrl, role: str) -> list[dict[str, str]
                 "taxonomy": taxonomy,
                 "tag": tag,
                 "name": f.concept.label(),
+                "balance": f.concept.balance,  # Extract balance attribute (debit/credit/None)
             })
 
     return out

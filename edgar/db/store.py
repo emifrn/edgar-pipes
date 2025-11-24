@@ -26,6 +26,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 taxonomy        TEXT NOT NULL,
                 tag             TEXT NOT NULL,
                 name            TEXT NOT NULL,
+                balance         TEXT,
                 FOREIGN KEY (cik) REFERENCES entities(cik) ON DELETE CASCADE,
                 UNIQUE (cik, taxonomy, tag)
             );

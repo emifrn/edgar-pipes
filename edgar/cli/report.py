@@ -204,7 +204,7 @@ def _get_facts_for_group(
         return ok([])  # No patterns defined for this group
 
     # Get all concepts for this CIK
-    query = "SELECT cid, tag FROM concepts WHERE cik = ?"
+    query = "SELECT cid, tag, balance FROM concepts WHERE cik = ?"
     result = db.store.select(conn, query, (cik,))
     if is_not_ok(result):
         return result
@@ -242,6 +242,7 @@ def _get_facts_for_group(
         SELECT
             c.cid,
             c.tag,
+            c.balance,
             d.fiscal_year,
             d.fiscal_period,
             f.value,
@@ -307,6 +308,8 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
     # Collect all unique concept names for column consistency
     all_concepts = set()
     concept_decimals: dict[str, str] = {}  # Track decimals per concept
+    concept_balance: dict[str, str | None] = {}  # Track balance per concept
+    concept_tag: dict[str, str] = {}  # Track tag per concept for average detection
 
     for fact in facts:
         concept_name = fact["concept_name"]
@@ -314,6 +317,12 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
         # Store the first decimals value seen for each concept (should be consistent)
         if concept_name not in concept_decimals and fact.get("decimals"):
             concept_decimals[concept_name] = fact["decimals"]
+        # Store balance attribute (debit/credit/None)
+        if concept_name not in concept_balance:
+            concept_balance[concept_name] = fact.get("balance")
+        # Store tag for average detection
+        if concept_name not in concept_tag:
+            concept_tag[concept_name] = fact.get("tag", "")
 
     # Group facts by (fiscal_year, fiscal_period, mode) to distinguish threeQ from Q3 quarter
     period_data: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(dict)
@@ -354,6 +363,8 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
             "fiscal_period": period_label,
             "mode": normalized_mode,
             "_concept_decimals": concept_decimals,  # Store metadata for scaling
+            "_concept_balance": concept_balance,  # Store balance metadata for Q4 derivation
+            "_concept_tag": concept_tag,  # Store tags for average detection
         }
         # Add all concepts as columns, even if missing (will be None)
         for concept_name in sorted(all_concepts):
@@ -416,9 +427,10 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
 
     # Get all unique concept names to ensure consistent columns
     all_concepts = set()
+    metadata_keys = ("fiscal_year", "fiscal_period", "mode", "_concept_decimals", "_concept_balance", "_concept_tag")
     for row in pivoted:
         for key in row.keys():
-            if key not in ("fiscal_year", "fiscal_period", "mode", "_concept_decimals"):
+            if key not in metadata_keys:
                 all_concepts.add(key)
 
     # Group pivoted data by fiscal year
@@ -442,15 +454,19 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
         q3_row = periods.get("Q3", {})
         ytd_9m_row = periods.get("9M YTD", {})
 
-        # Get decimals metadata for rounding derived values
+        # Get metadata for Q4 derivation
         concept_decimals = fy_row.get("_concept_decimals", {})
+        concept_balance = fy_row.get("_concept_balance", {})
+        concept_tag = fy_row.get("_concept_tag", {})
 
         # Create Q4 row with all concepts initialized to None
         q4_row = {
             "fiscal_year": fiscal_year,
             "fiscal_period": "Q4",
             "mode": "flow",  # Will be updated below if all concepts are instant
-            "_concept_decimals": fy_row.get("_concept_decimals", {})  # Preserve decimals metadata
+            "_concept_decimals": concept_decimals,
+            "_concept_balance": concept_balance,
+            "_concept_tag": concept_tag,
         }
         for concept_name in all_concepts:
             q4_row[concept_name] = None
@@ -469,31 +485,57 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
             is_stock = concept_modes.get(concept_name) == "instant"
 
             if is_stock:
-                # Stock variable: just copy FY value
+                # Stock variable (balance sheet): copy FY value
                 q4_row[concept_name] = fy_value
                 has_stock = True
             else:
-                # Flow variable: try to derive Q4
+                # Flow variable: determine if derivable or should copy FY
                 has_flow = True
-                derived_value = None
 
-                # Option 1: Use 9M YTD if available (most common case)
-                ytd_9m_val = ytd_9m_row.get(concept_name)
-                if ytd_9m_val is not None:
-                    derived_value = fy_value - ytd_9m_val
+                # Get concept metadata
+                balance = concept_balance.get(concept_name)
+                tag = concept_tag.get(concept_name, "")
+
+                # Decide derivation strategy based on XBRL metadata:
+                # 1. If balance is debit/credit → cumulative flow (revenue, expenses) → derive Q4
+                # 2. If tag contains "average" → weighted average → copy FY value
+                # 3. Otherwise → default to derivation (handles EPS, ratios)
+
+                should_derive = True
+                if balance in ("debit", "credit"):
+                    # Cumulative flow: derive Q4 by subtraction
+                    should_derive = True
+                elif "average" in tag.lower():
+                    # Weighted average or similar: copy FY value
+                    should_derive = False
                 else:
-                    # Option 2: Use Q1 + Q2 + Q3 if all are available
-                    q1_val = q1_row.get(concept_name)
-                    q2_val = q2_row.get(concept_name)
-                    q3_val = q3_row.get(concept_name)
+                    # Default: derive (handles EPS and other ratios)
+                    should_derive = True
 
-                    if q1_val is not None and q2_val is not None and q3_val is not None:
-                        derived_value = fy_value - (q1_val + q2_val + q3_val)
-                    # Otherwise leave as None (can't derive)
+                if not should_derive:
+                    # Copy FY value (weighted averages)
+                    q4_row[concept_name] = fy_value
+                else:
+                    # Derive Q4 by subtraction
+                    derived_value = None
 
-                # Round derived value to match filed precision
-                if derived_value is not None:
-                    q4_row[concept_name] = _round_to_decimals(derived_value, concept_decimals.get(concept_name))
+                    # Option 1: Use 9M YTD if available (most common case)
+                    ytd_9m_val = ytd_9m_row.get(concept_name)
+                    if ytd_9m_val is not None:
+                        derived_value = fy_value - ytd_9m_val
+                    else:
+                        # Option 2: Use Q1 + Q2 + Q3 if all are available
+                        q1_val = q1_row.get(concept_name)
+                        q2_val = q2_row.get(concept_name)
+                        q3_val = q3_row.get(concept_name)
+
+                        if q1_val is not None and q2_val is not None and q3_val is not None:
+                            derived_value = fy_value - (q1_val + q2_val + q3_val)
+                        # Otherwise leave as None (can't derive)
+
+                    # Round derived value to match filed precision
+                    if derived_value is not None:
+                        q4_row[concept_name] = _round_to_decimals(derived_value, concept_decimals.get(concept_name))
 
         # Set mode based on what types of concepts we derived
         # If only stock variables (instant), mark as instant
@@ -604,7 +646,7 @@ def _apply_scale(pivoted: list[dict[str, Any]], scale_choice: str) -> list[dict[
         Formatted data with scale indicators in column headers
     """
     # Metadata columns that should not be processed
-    metadata_cols = {"fiscal_year", "fiscal_period", "mode", "_concept_decimals"}
+    metadata_cols = {"fiscal_year", "fiscal_period", "mode", "_concept_decimals", "_concept_balance", "_concept_tag"}
 
     # Build formatted output
     formatted = []
