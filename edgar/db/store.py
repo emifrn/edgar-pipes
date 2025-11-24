@@ -97,6 +97,7 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 xid             INTEGER NOT NULL,
                 unid            INTEGER NOT NULL,
                 value           NUMERIC NOT NULL,
+                decimals        TEXT,
                 FOREIGN KEY (rid) REFERENCES roles(rid) ON DELETE CASCADE,
                 FOREIGN KEY (cid) REFERENCES concepts(cid) ON DELETE CASCADE,
                 FOREIGN KEY (xid) REFERENCES contexts(xid) ON DELETE CASCADE,

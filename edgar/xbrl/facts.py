@@ -61,6 +61,12 @@ def make_record(fact, access_no: str, role: str, concept_id: int) -> dict:
     except Exception:
         unit = None
 
+    # Extract decimals attribute for scale information
+    try:
+        decimals = str(fact.decimals) if fact.decimals is not None else None
+    except Exception:
+        decimals = None
+
     dimensions = {
         dim.dimensionQname.localName: dim.memberQname.localName
         for dim in getattr(ctx, 'dims', {}).values()
@@ -80,6 +86,7 @@ def make_record(fact, access_no: str, role: str, concept_id: int) -> dict:
         "end_date": end.date(),
         "mode": mode,
         "unit": unit,
+        "decimals": decimals,
         "dimensions": dimensions,
         "has_dimensions": bool(dimensions),
     }

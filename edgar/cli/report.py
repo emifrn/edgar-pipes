@@ -245,6 +245,7 @@ def _get_facts_for_group(
             d.fiscal_year,
             d.fiscal_period,
             f.value,
+            f.decimals,
             ctx.mode,
             ctx.end_date
         FROM facts f
@@ -284,6 +285,7 @@ def _get_facts_for_group(
                 "fiscal_year": row["fiscal_year"],
                 "fiscal_period": row["fiscal_period"],
                 "value": row["value"],
+                "decimals": row["decimals"],
                 "mode": row["mode"],
                 "end_date": row["end_date"]
             })
@@ -304,8 +306,14 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
     """
     # Collect all unique concept names for column consistency
     all_concepts = set()
+    concept_decimals: dict[str, str] = {}  # Track decimals per concept
+
     for fact in facts:
-        all_concepts.add(fact["concept_name"])
+        concept_name = fact["concept_name"]
+        all_concepts.add(concept_name)
+        # Store the first decimals value seen for each concept (should be consistent)
+        if concept_name not in concept_decimals and fact.get("decimals"):
+            concept_decimals[concept_name] = fact["decimals"]
 
     # Group facts by (fiscal_year, fiscal_period, mode) to distinguish threeQ from Q3 quarter
     period_data: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(dict)
@@ -345,6 +353,7 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
             "fiscal_year": fiscal_year,
             "fiscal_period": period_label,
             "mode": normalized_mode,
+            "_concept_decimals": concept_decimals,  # Store metadata for scaling
         }
         # Add all concepts as columns, even if missing (will be None)
         for concept_name in sorted(all_concepts):
@@ -543,53 +552,101 @@ def _detect_scale(pivoted: list[dict[str, Any]]) -> str:
 
 def _apply_scale(pivoted: list[dict[str, Any]], scale_choice: str) -> list[dict[str, Any]]:
     """
-    Apply scaling to all numeric columns and add scale column.
+    Apply XBRL-native scaling with column headers indicating scale.
+
+    Uses decimals from XBRL to determine native scale for each concept:
+    - Negative decimals (-3, -6, -9): Value is pre-scaled, use XBRL scale
+    - Positive decimals or INF: Value is NOT scaled (per-share, ratios)
 
     Args:
-        pivoted: Report data rows
-        scale_choice: "auto", "B", "M", or "K"
+        pivoted: Report data rows (includes _concept_decimals metadata)
+        scale_choice: "auto" (use XBRL-native) or override scale "B"/"M"/"K"
 
     Returns:
-        Scaled data with scale column added
+        Formatted data with scale indicators in column headers
     """
-    # Determine actual scale to use
-    if scale_choice == "auto":
-        scale = _detect_scale(pivoted)
-    else:
-        scale = scale_choice
+    # Metadata columns that should not be processed
+    metadata_cols = {"fiscal_year", "fiscal_period", "mode", "_concept_decimals"}
 
-    # Determine scale factor
-    scale_factors = {
-        "B": 1e9,
-        "M": 1e6,
-        "K": 1e3,
-        "": 1
-    }
-    factor = scale_factors.get(scale, 1)
-
-    # Metadata columns that should not be scaled
-    metadata_cols = {"fiscal_year", "fiscal_period", "mode"}
-
-    # Apply scaling to all rows
-    scaled = []
+    # Build formatted output
+    formatted = []
     for row in pivoted:
-        scaled_row = {}
+        concept_decimals = row.get("_concept_decimals", {})
+        formatted_row = {}
 
-        # Add metadata columns in order with renamed headers: FY, Period, Mode, Scale
-        scaled_row["FY"] = row.get("fiscal_year")
-        scaled_row["Period"] = row.get("fiscal_period")
-        scaled_row["Mode"] = row.get("mode")
-        scaled_row["Scale"] = scale
+        # Add metadata columns with renamed headers
+        formatted_row["FY"] = row.get("fiscal_year")
+        formatted_row["Period"] = row.get("fiscal_period")
+        formatted_row["Mode"] = row.get("mode")
 
-        # Add remaining columns (scaled numeric values)
+        # Process each concept column
         for key, value in row.items():
             if key in metadata_cols:
-                continue  # Already added
-            elif isinstance(value, (int, float)) and value is not None:
-                scaled_row[key] = value / factor
-            else:
-                scaled_row[key] = value
+                continue  # Skip metadata
 
-        scaled.append(scaled_row)
+            # Determine scale for this concept from XBRL decimals
+            decimals = concept_decimals.get(key)
+            scale_suffix = _get_scale_suffix_from_decimals(decimals, scale_choice)
 
-    return scaled
+            # Add column with scale suffix in header
+            column_name = f"{key} ({scale_suffix})" if scale_suffix else key
+            formatted_row[column_name] = value
+
+        formatted.append(formatted_row)
+
+    return formatted
+
+
+def _get_scale_suffix_from_decimals(decimals: str | None, scale_override: str) -> str:
+    """
+    Determine scale suffix for column header based on XBRL decimals.
+
+    Args:
+        decimals: XBRL decimals attribute (e.g., "-3", "2", "INF")
+        scale_override: User override ("auto", "B", "M", "K")
+
+    Returns:
+        Scale suffix string (e.g., "K", "M", "$", "count")
+    """
+    # Handle scale override (not currently used in auto mode)
+    if scale_override != "auto":
+        return scale_override
+
+    # Parse decimals to determine native scale
+    if decimals is None:
+        return "K"  # Default fallback for backward compatibility
+
+    # Special cases
+    if decimals == "INF":
+        return "count"  # Share counts, pure numbers
+
+    # Try to parse as integer
+    try:
+        dec_int = int(decimals)
+    except (ValueError, TypeError):
+        return ""  # Unknown format
+
+    # Negative decimals indicate pre-scaled values
+    if dec_int == -9:
+        return "B"  # Billions
+    elif dec_int == -6:
+        return "M"  # Millions
+    elif dec_int == -3:
+        return "K"  # Thousands
+    elif dec_int < 0:
+        # Other negative decimals, use generic scale
+        scale_factor = 10 ** (-dec_int)
+        if scale_factor >= 1e9:
+            return "B"
+        elif scale_factor >= 1e6:
+            return "M"
+        elif scale_factor >= 1e3:
+            return "K"
+        else:
+            return ""
+
+    # Positive decimals = not scaled (per-share, ratios)
+    elif dec_int >= 0:
+        return "$"  # Dollar amounts per share, or pure ratios
+
+    return ""  # Fallback

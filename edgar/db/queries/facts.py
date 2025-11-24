@@ -190,7 +190,8 @@ def insert(conn: sqlite3.Connection, facts_list: list[dict[str, Any]]) -> Result
                 "cid": fact["cid"],
                 "xid": xid,
                 "unid": unid,
-                "value": fact["value"]
+                "value": fact["value"],
+                "decimals": fact.get("decimals")
             }]
 
             result = db.store.insert_or_ignore(conn, "facts", fact_data)
