@@ -390,7 +390,7 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
     all_concepts = set()
     for row in pivoted:
         for key in row.keys():
-            if key not in ("fiscal_year", "fiscal_period", "mode"):
+            if key not in ("fiscal_year", "fiscal_period", "mode", "_concept_decimals"):
                 all_concepts.add(key)
 
     # Group pivoted data by fiscal year
@@ -418,7 +418,8 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
         q4_row = {
             "fiscal_year": fiscal_year,
             "fiscal_period": "Q4",
-            "mode": "flow"  # Will be updated below if all concepts are instant
+            "mode": "flow",  # Will be updated below if all concepts are instant
+            "_concept_decimals": fy_row.get("_concept_decimals", {})  # Preserve decimals metadata
         }
         for concept_name in all_concepts:
             q4_row[concept_name] = None
