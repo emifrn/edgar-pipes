@@ -287,6 +287,8 @@ def _get_facts_for_group(
                 "fiscal_period": row["fiscal_period"],
                 "value": row["value"],
                 "decimals": row["decimals"],
+                "balance": row["balance"],  # Include balance for Q4 derivation
+                "tag": row["tag"],  # Include tag for average detection
                 "mode": row["mode"],
                 "end_date": row["end_date"]
             })
