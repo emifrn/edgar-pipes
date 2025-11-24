@@ -4,6 +4,7 @@ db.queries.facts - Fact query and insertion functions
 Facts are the core financial data extracted from XBRL filings.
 Each fact represents a specific value for a concept in a particular context.
 """
+import re
 import sqlite3
 from typing import Any, Optional
 
@@ -220,3 +221,131 @@ def insert(conn: sqlite3.Connection, facts_list: list[dict[str, Any]]) -> Result
             continue
 
     return ok(inserted_count)
+
+
+
+def select_group(
+    conn: sqlite3.Connection,
+    cik: str,
+    group_name: str,
+    date_filters: list[tuple[str, str, str]] | None
+) -> Result[list[dict[str, Any]], str]:
+    """
+    Get all facts for a CIK and group, performing concept pattern matching
+    and complex joining required for the report generation.
+    """
+    
+    # 1. Get group ID (Simplified using helper)
+    result = db.queries.groups.get_id(conn, group_name)
+    if is_not_ok(result):
+        return result
+    group_id = result[1]
+    if group_id is None:
+        return err(f"group '{group_name}' not found")
+
+    # 2. Get concept patterns for this group/CIK
+    query = """
+        SELECT cp.name, cp.pattern
+        FROM concept_patterns cp
+        JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
+        WHERE gcp.gid = ? AND cp.cik = ?
+    """
+    result = db.store.select(conn, query, (group_id, cik))
+    if is_not_ok(result):
+        return result
+
+    patterns = result[1]
+    if not patterns:
+        return ok([])  
+
+    # 3. Get all concepts for this CIK (Custom query required for the 'balance' field)
+    query = "SELECT cid, tag, balance FROM concepts WHERE cik = ?"
+    result = db.store.select(conn, query, (cik,))
+    if is_not_ok(result):
+        return result
+
+    all_concepts = result[1]
+
+    # 4. Match concepts to patterns (Application logic)
+    tag_to_pattern_name: dict[str, str] = {}
+    matched_concept_ids: set[int] = set()
+
+    for concept_row in all_concepts:
+        cid = concept_row["cid"]
+        tag = concept_row["tag"]
+
+        for pattern_row in patterns:
+            pattern_name = pattern_row["name"]
+            pattern = pattern_row["pattern"]
+
+            try:
+                regex = re.compile(pattern)
+                if regex.search(tag):
+                    tag_to_pattern_name[tag] = pattern_name
+                    matched_concept_ids.add(cid)
+                    break 
+            except re.error:
+                continue
+
+    if not matched_concept_ids:
+        return ok([])
+
+    # 5. Query facts for matched concepts (The main bespoke join)
+    placeholders = ",".join("?" * len(matched_concept_ids))
+    query = f"""
+        SELECT
+            c.cid,
+            c.tag,
+            c.balance,
+            d.fiscal_year,
+            d.fiscal_period,
+            f.value,
+            f.decimals,
+            ctx.mode,
+            ctx.end_date
+        FROM facts f
+        JOIN roles fr ON f.rid = fr.rid
+        JOIN filings fi ON fr.access_no = fi.access_no
+        JOIN dei d ON fi.access_no = d.access_no
+        JOIN concepts c ON f.cid = c.cid
+        JOIN contexts ctx ON f.xid = ctx.xid
+        WHERE fi.cik = ?
+          AND c.cid IN ({placeholders})
+    """
+
+    params = [cik] + list(matched_concept_ids)
+
+    # Add date filters if specified
+    if date_filters:
+        for field, operator, value in date_filters:
+            query += f" AND ctx.{field} {operator} ?"
+            params.append(value)
+
+    query += " ORDER BY d.fiscal_year, d.fiscal_period, c.tag"
+
+    result = db.store.select(conn, query, params)
+    if is_not_ok(result):
+        return result
+
+    fact_rows = result[1]
+
+    # 6. Map tags to pattern names in the output (Final application logic)
+    facts = []
+    for row in fact_rows:
+        tag = row["tag"]
+        pattern_name = tag_to_pattern_name.get(tag)
+        
+        if pattern_name:
+            facts.append({
+                "concept_name": pattern_name,
+                "fiscal_year": row["fiscal_year"],
+                "fiscal_period": row["fiscal_period"],
+                "value": row["value"],
+                "decimals": row["decimals"],
+                "balance": row["balance"],
+                "tag": row["tag"],
+                "mode": row["mode"],
+                "end_date": row["end_date"]
+            })
+
+    return ok(facts)

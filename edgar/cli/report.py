@@ -13,8 +13,6 @@ from collections import defaultdict
 # Local
 from edgar import config
 from edgar import db
-from edgar import config
-from edgar import db
 from edgar import cli
 from edgar.cli.shared import Cmd
 from edgar.result import Result, ok, err, is_ok, is_not_ok
@@ -110,7 +108,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
 
         # Get facts for this CIK and group
         date_filters = cli.shared.parse_date_constraints(args.date, 'end_date')
-        result = _get_facts_for_group(conn, cik, args.group, date_filters)
+        result = db.queries.facts.select_group(conn, cik, args.group, date_filters)
         if is_not_ok(result):
             conn.close()
             return result
@@ -158,142 +156,6 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         if 'conn' in locals():
             conn.close()
         return err(f"cli.report.run: {e}")
-
-
-def _get_facts_for_group(
-    conn: sqlite3.Connection,
-    cik: str,
-    group_name: str,
-    date_filters: list[tuple[str, str, str]] | None
-) -> Result[list[dict[str, Any]], str]:
-    """
-    Get all facts for a CIK and group.
-
-    Returns list of dicts with:
-    - concept_name: semantic name from concept_patterns
-    - fiscal_year: year
-    - fiscal_period: Q1/Q2/Q3/FY
-    - value: numeric value
-    - mode: instant/quarter/semester/threeQ/year
-    """
-    # Get group ID
-    query = "SELECT gid FROM groups WHERE name = ?"
-    result = db.store.select(conn, query, (group_name,))
-    if is_not_ok(result):
-        return result
-
-    rows = result[1]
-    if not rows:
-        return err(f"group '{group_name}' not found")
-
-    group_id = rows[0]["gid"]
-
-    # Get concept patterns for this group
-    query = """
-        SELECT cp.name, cp.pattern
-        FROM concept_patterns cp
-        JOIN group_concept_patterns gcp ON cp.pid = gcp.pid
-        WHERE gcp.gid = ? AND cp.cik = ?
-    """
-    result = db.store.select(conn, query, (group_id, cik))
-    if is_not_ok(result):
-        return result
-
-    patterns = result[1]
-    if not patterns:
-        return ok([])  # No patterns defined for this group
-
-    # Get all concepts for this CIK
-    query = "SELECT cid, tag, balance FROM concepts WHERE cik = ?"
-    result = db.store.select(conn, query, (cik,))
-    if is_not_ok(result):
-        return result
-
-    all_concepts = result[1]
-
-    # Match concepts to patterns and build tag->pattern_name mapping
-    tag_to_pattern_name: dict[str, str] = {}
-    matched_concept_ids: set[int] = set()
-
-    for concept_row in all_concepts:
-        cid = concept_row["cid"]
-        tag = concept_row["tag"]
-
-        # Try to match against each pattern
-        for pattern_row in patterns:
-            pattern_name = pattern_row["name"]
-            pattern = pattern_row["pattern"]
-
-            try:
-                regex = re.compile(pattern)
-                if regex.search(tag):
-                    tag_to_pattern_name[tag] = pattern_name
-                    matched_concept_ids.add(cid)
-                    break  # Found a match, stop checking other patterns
-            except re.error:
-                continue  # Skip invalid patterns
-
-    if not matched_concept_ids:
-        return ok([])  # No concepts matched any patterns
-
-    # Query facts for matched concepts
-    placeholders = ",".join("?" * len(matched_concept_ids))
-    query = f"""
-        SELECT
-            c.cid,
-            c.tag,
-            c.balance,
-            d.fiscal_year,
-            d.fiscal_period,
-            f.value,
-            f.decimals,
-            ctx.mode,
-            ctx.end_date
-        FROM facts f
-        JOIN roles fr ON f.rid = fr.rid
-        JOIN filings fi ON fr.access_no = fi.access_no
-        JOIN dei d ON fi.access_no = d.access_no
-        JOIN concepts c ON f.cid = c.cid
-        JOIN contexts ctx ON f.xid = ctx.xid
-        WHERE fi.cik = ?
-          AND c.cid IN ({placeholders})
-    """
-
-    params = [cik] + list(matched_concept_ids)
-
-    # Add date filters if specified
-    if date_filters:
-        for field, operator, value in date_filters:
-            query += f" AND ctx.{field} {operator} ?"
-            params.append(value)
-
-    query += " ORDER BY d.fiscal_year, d.fiscal_period, c.tag"
-
-    result = db.store.select(conn, query, params)
-    if is_not_ok(result):
-        return result
-
-    fact_rows = result[1]
-
-    # Map tags to pattern names in the output
-    facts = []
-    for row in fact_rows:
-        tag = row["tag"]
-        pattern_name = tag_to_pattern_name.get(tag)
-        if pattern_name:  # Should always be true, but safety check
-            facts.append({
-                "concept_name": pattern_name,  # Use semantic name from pattern
-                "fiscal_year": row["fiscal_year"],
-                "fiscal_period": row["fiscal_period"],
-                "value": row["value"],
-                "decimals": row["decimals"],
-                "balance": row["balance"],  # Include balance for Q4 derivation
-                "tag": row["tag"],  # Include tag for average detection
-                "mode": row["mode"],
-                "end_date": row["end_date"]
-            })
-
-    return ok(facts)
 
 
 def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], str]:
