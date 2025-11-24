@@ -364,6 +364,34 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
     return ok(pivoted)
 
 
+def _round_to_decimals(value: float, decimals: str | None) -> float:
+    """
+    Round a derived value to match XBRL decimal precision.
+
+    Args:
+        value: The calculated value to round
+        decimals: XBRL decimals attribute (e.g., "2", "-3", "INF")
+
+    Returns:
+        Rounded value matching the filed precision
+    """
+    if decimals is None or decimals == "INF":
+        return value  # No rounding needed
+
+    try:
+        dec_int = int(decimals)
+    except (ValueError, TypeError):
+        return value  # Can't parse, return as-is
+
+    # Positive decimals: round to that many decimal places
+    if dec_int >= 0:
+        return round(value, dec_int)
+
+    # Negative decimals: value is pre-scaled, round to integers
+    # (e.g., decimals=-3 means value in thousands, round to nearest thousand)
+    return round(value)
+
+
 def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Derive Q4 values automatically when possible.
@@ -414,6 +442,9 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
         q3_row = periods.get("Q3", {})
         ytd_9m_row = periods.get("9M YTD", {})
 
+        # Get decimals metadata for rounding derived values
+        concept_decimals = fy_row.get("_concept_decimals", {})
+
         # Create Q4 row with all concepts initialized to None
         q4_row = {
             "fiscal_year": fiscal_year,
@@ -444,10 +475,12 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
             else:
                 # Flow variable: try to derive Q4
                 has_flow = True
+                derived_value = None
+
                 # Option 1: Use 9M YTD if available (most common case)
                 ytd_9m_val = ytd_9m_row.get(concept_name)
                 if ytd_9m_val is not None:
-                    q4_row[concept_name] = fy_value - ytd_9m_val
+                    derived_value = fy_value - ytd_9m_val
                 else:
                     # Option 2: Use Q1 + Q2 + Q3 if all are available
                     q1_val = q1_row.get(concept_name)
@@ -455,8 +488,12 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
                     q3_val = q3_row.get(concept_name)
 
                     if q1_val is not None and q2_val is not None and q3_val is not None:
-                        q4_row[concept_name] = fy_value - (q1_val + q2_val + q3_val)
+                        derived_value = fy_value - (q1_val + q2_val + q3_val)
                     # Otherwise leave as None (can't derive)
+
+                # Round derived value to match filed precision
+                if derived_value is not None:
+                    q4_row[concept_name] = _round_to_decimals(derived_value, concept_decimals.get(concept_name))
 
         # Set mode based on what types of concepts we derived
         # If only stock variables (instant), mark as instant
