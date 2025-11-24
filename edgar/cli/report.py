@@ -498,21 +498,25 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
                 balance = concept_balance.get(concept_name)
                 tag = concept_tag.get(concept_name, "")
 
-                # Decide derivation strategy based on XBRL metadata:
+                # Decide derivation strategy based on XBRL metadata (conservative approach):
                 # 1. If balance is debit/credit → cumulative flow (revenue, expenses) → derive Q4
                 # 2. If tag contains "average" → weighted average → copy FY value
-                # 3. Otherwise → default to derivation (handles EPS, ratios)
+                # 3. If tag contains "earningspershare" → EPS exception → derive Q4
+                # 4. Otherwise → conservative default → copy FY (unknown metrics)
 
-                should_derive = True
+                should_derive = False  # Conservative default
                 if balance in ("debit", "credit"):
-                    # Cumulative flow: derive Q4 by subtraction
+                    # Cumulative flow with balance type: derive Q4 by subtraction
                     should_derive = True
                 elif "average" in tag.lower():
                     # Weighted average or similar: copy FY value
                     should_derive = False
-                else:
-                    # Default: derive (handles EPS and other ratios)
+                elif "earningspershare" in tag.lower():
+                    # EPS is a critical ratio that IS derivable: derive Q4
                     should_derive = True
+                else:
+                    # Conservative default for unknown metrics: copy FY
+                    should_derive = False
 
                 if not should_derive:
                     # Copy FY value (weighted averages)
