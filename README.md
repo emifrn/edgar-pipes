@@ -20,8 +20,8 @@ of a subcommand becomes the input of the next one. This mechanism enables
 composable and highly adaptable data-pipelines with zero programming
 requirements. This approach shifts the focus from building software for
 financial data extraction to a more interactive exploration of financial
-information directly in the Linux terminal, and so enabling all kinds of
-analysis and reporting solutions.
+information directly in the Linux terminal, enabling all kinds of analysis and
+reporting solutions.
 
 The typical edgar-pipes workflow includes subcommands that **probe** XBRL
 filings via EDGAR API. **Select** tags with their historical variations via
