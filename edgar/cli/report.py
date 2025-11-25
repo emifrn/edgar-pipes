@@ -536,13 +536,56 @@ def _apply_scale(pivoted: list[dict[str, Any]], scale_choice: str) -> list[dict[
             decimals = concept_decimals.get(key)
             scale_suffix = _get_scale_suffix_from_decimals(decimals, scale_choice)
 
+            # Scale the value for display
+            scaled_value = _scale_value_for_display(value, decimals) if value is not None else value
+
             # Add column with scale suffix in header
             column_name = f"{key} ({scale_suffix})" if scale_suffix else key
-            formatted_row[column_name] = value
+            formatted_row[column_name] = scaled_value
 
         formatted.append(formatted_row)
 
     return formatted
+
+
+def _scale_value_for_display(value: float, decimals: str | None) -> float:
+    """
+    Scale a value for display based on XBRL decimals attribute.
+
+    XBRL decimals indicate rounding/precision, NOT that values are pre-scaled:
+    - decimals=-3: value rounded to thousands, display as value/1000 with (K) suffix
+    - decimals=-6: value rounded to millions, display as value/1000000 with (M) suffix
+    - decimals=-9: value rounded to billions, display as value/1000000000 with (B) suffix
+    - decimals>=0 or INF: value is exact or per-unit, display as-is
+
+    Args:
+        value: Raw value from database
+        decimals: XBRL decimals attribute (e.g., "-3", "2", "INF")
+
+    Returns:
+        Scaled value for display
+    """
+    if decimals is None or decimals == "INF":
+        return value  # No scaling needed
+
+    try:
+        dec_int = int(decimals)
+    except (ValueError, TypeError):
+        return value  # Unknown format, return as-is
+
+    # Negative decimals indicate rounding precision - scale for display
+    if dec_int == -9:
+        return value / 1_000_000_000  # Billions
+    elif dec_int == -6:
+        return value / 1_000_000  # Millions
+    elif dec_int == -3:
+        return value / 1_000  # Thousands
+    elif dec_int < 0:
+        # Other negative decimals, apply generic scaling
+        return value / (10 ** (-dec_int))
+    else:
+        # Positive decimals or zero: value is per-unit (EPS, ratios), no scaling
+        return value
 
 
 def _get_scale_suffix_from_decimals(decimals: str | None, scale_override: str) -> str:
