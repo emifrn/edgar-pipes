@@ -548,7 +548,7 @@ def _apply_scale(pivoted: list[dict[str, Any]], scale_choice: str) -> list[dict[
     return formatted
 
 
-def _scale_value_for_display(value: float, decimals: str | None) -> float:
+def _scale_value_for_display(value: float, decimals: str | None) -> float | int:
     """
     Scale a value for display based on XBRL decimals attribute.
 
@@ -558,12 +558,15 @@ def _scale_value_for_display(value: float, decimals: str | None) -> float:
     - decimals=-9: value rounded to billions, display as value/1000000000 with (B) suffix
     - decimals>=0 or INF: value is exact or per-unit, display as-is
 
+    Returns integers for negative decimals (K/M/B scaling) since fractional parts
+    are meaningless when values are already rounded to thousands/millions/billions.
+
     Args:
         value: Raw value from database
         decimals: XBRL decimals attribute (e.g., "-3", "2", "INF")
 
     Returns:
-        Scaled value for display
+        Scaled value for display (int for K/M/B, float for per-unit)
     """
     if decimals is None or decimals == "INF":
         return value  # No scaling needed
@@ -574,15 +577,16 @@ def _scale_value_for_display(value: float, decimals: str | None) -> float:
         return value  # Unknown format, return as-is
 
     # Negative decimals indicate rounding precision - scale for display
+    # Return as int since fractional parts are meaningless after rounding
     if dec_int == -9:
-        return value / 1_000_000_000  # Billions
+        return int(value / 1_000_000_000)  # Billions
     elif dec_int == -6:
-        return value / 1_000_000  # Millions
+        return int(value / 1_000_000)  # Millions
     elif dec_int == -3:
-        return value / 1_000  # Thousands
+        return int(value / 1_000)  # Thousands
     elif dec_int < 0:
         # Other negative decimals, apply generic scaling
-        return value / (10 ** (-dec_int))
+        return int(value / (10 ** (-dec_int)))
     else:
         # Positive decimals or zero: value is per-unit (EPS, ratios), no scaling
         return value
