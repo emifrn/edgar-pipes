@@ -15,7 +15,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     "edgar": {
-        "user_agent": "edgar-pipes/0.3.1",  # Fallback (not ideal, prompt user)
+        "user_agent": "edgar-pipes/0.3.2",  # Fallback (not ideal, prompt user)
     },
     "output": {
         "theme": "nobox-minimal",
