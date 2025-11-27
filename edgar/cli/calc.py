@@ -4,11 +4,15 @@ CLI: calc
 Calculate new columns based on arithmetic expressions.
 Evaluates expressions on each row and adds computed columns to the data.
 
+Column references use concept names (without units). The calc command automatically
+handles unit suffixes like (K), ($), etc. from report output.
+
 Examples:
     edgar report -t aeo -g Balance | calc "Current ratio = Current assets / Current liabilities"
     edgar report -t aeo -g Balance | calc "Working capital = Current assets - Current liabilities"
     edgar report -t aeo -g Balance | calc "Debt to equity = Total liabilities / Stockholders equity"
     edgar report -t bke -g Balance | calc -z "Cash = Cash.Unrestricted + Cash.Total"
+    edgar report -t bke -g Operations | calc "Gross margin = GrossProfit / Revenue * 100"
 """
 
 import re
@@ -122,6 +126,19 @@ def _parse_expression(expr_str: str) -> Result[tuple[str, str], str]:
         return ok((expression, expression))
 
 
+def _strip_units(col_name: str) -> str:
+    """
+    Strip unit suffix from column name.
+
+    Examples:
+        "Revenue (K)" -> "Revenue"
+        "EPS.Basic ($)" -> "EPS.Basic"
+        "Assets" -> "Assets"
+    """
+    # Remove pattern like " (unit)" at the end
+    return re.sub(r'\s*\([^)]+\)\s*$', '', col_name).strip()
+
+
 def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: bool = False) -> Result[float | int | None, str]:
     """
     Safely evaluate arithmetic expression with column references.
@@ -142,28 +159,38 @@ def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: boo
     # Build safe namespace with only row data
     # Column names with spaces/special chars are accessed as variables
     namespace = {}
-
-    # Create variable names from column names
-    # Replace spaces and special chars with underscores
     col_mapping = {}  # Maps sanitized names back to original column names
 
     for col_name, value in row.items():
-        # Create a valid Python identifier from column name
+        # Add the full column name (with units)
         var_name = _sanitize_column_name(col_name)
         namespace[var_name] = value
         col_mapping[var_name] = col_name
 
-    # Find all potential column names in the expression
-    # We need to check if columns referenced in expression actually exist in row
-    # Extract potential column names by looking for sequences of words in the expression
-    # This is a heuristic - we look for patterns that could be column names
+        # ALSO add the base name (without units) if units are present
+        base_name = _strip_units(col_name)
+        if base_name != col_name:
+            base_var_name = _sanitize_column_name(base_name)
+            # Only add if not already present (avoid conflicts)
+            if base_var_name not in namespace:
+                namespace[base_var_name] = value
+                col_mapping[base_var_name] = col_name
 
-    # First, identify which columns from the expression exist in the row
-    # We'll do a simple check: see if column replacement would work
+    # Find all potential column names in the expression
+    # Check both with and without units
     missing_columns = []
     for potential_col in _extract_column_names(expression):
+        # Check if column exists as-is
         if potential_col not in row:
-            missing_columns.append(potential_col)
+            # Check if column exists when units are stripped
+            found = False
+            for actual_col in row.keys():
+                if _strip_units(actual_col) == potential_col:
+                    found = True
+                    break
+
+            if not found:
+                missing_columns.append(potential_col)
 
     # If any column is missing, return None
     if missing_columns:
@@ -172,15 +199,22 @@ def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: boo
     # Replace column references in expression with sanitized variable names
     modified_expression = expression
 
-    # Sort columns by length (longest first) to avoid partial matches
-    # e.g., "Current assets current" should match "Current assets" before "Current"
-    sorted_cols = sorted(row.keys(), key=len, reverse=True)
+    # Build list of all column variants (with and without units)
+    all_column_variants = []
+    for col_name in row.keys():
+        all_column_variants.append(col_name)
+        base_name = _strip_units(col_name)
+        if base_name != col_name:
+            all_column_variants.append(base_name)
 
-    for col_name in sorted_cols:
-        var_name = _sanitize_column_name(col_name)
-        # Use word boundary replacement to avoid partial matches
-        # But we need to handle cases where column names have special chars
-        modified_expression = modified_expression.replace(col_name, var_name)
+    # Remove duplicates and sort by length (longest first) to avoid partial matches
+    all_column_variants = sorted(set(all_column_variants), key=len, reverse=True)
+
+    for col_variant in all_column_variants:
+        var_name = _sanitize_column_name(col_variant)
+        # Only replace if the variable name exists in namespace
+        if var_name in namespace:
+            modified_expression = modified_expression.replace(col_variant, var_name)
 
     # Add safe math functions to namespace
     safe_functions = {

@@ -199,6 +199,14 @@ ep report -t TICKER -g Balance | ep calc "Working capital = Current assets - Cur
 ep report -t TICKER -g Balance | ep calc \
   "Current ratio = Current assets / Current liabilities" \
   "Debt to equity = Total debt / Total equity"
+
+# Column names work with or without units
+ep report -t TICKER -g Operations | ep calc "Gross margin = GrossProfit / Revenue * 100"
+# Works even though report shows "GrossProfit (K)" and "Revenue (K)"
+
+# Track margins over quarters
+ep report -t TICKER -g Operations --quarterly | \
+  ep calc "Gross margin = GrossProfit / Revenue * 100"
 ```
 
 ---

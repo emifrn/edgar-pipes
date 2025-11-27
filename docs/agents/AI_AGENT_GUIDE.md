@@ -202,6 +202,19 @@ ep report -t TICKER -g GROUP --yearly
 # Example: Assets.Current should sum to individual current asset line items
 ```
 
+**9. Calculate derived metrics**
+
+```bash
+# Add calculated columns to reports
+ep report -t TICKER -g Operations --yearly | \
+  ep calc "Gross margin = GrossProfit / Revenue * 100" \
+          "Operating margin = Income.Operating / Revenue * 100"
+
+# Column references use concept names (without units)
+# Works even though report shows "Revenue (K)" and "GrossProfit (K)"
+# The calc command automatically handles unit suffixes like (K), ($), etc.
+```
+
 ## Concept naming convention
 
 * Use hierarchical dot notation: `Category.Type.Period`
