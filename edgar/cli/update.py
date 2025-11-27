@@ -290,7 +290,7 @@ def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str,
                 case "Q3":
                     best = xbrl.facts.get_best_q3(items, past_periods, doc_period_end)
                 case _:
-                    best = xbrl.facts.get_best_fy(items, past_periods)
+                    best = xbrl.facts.get_best_fy(items, past_periods, doc_period_end)
 
         if best is not None:
             chosen.append(best)

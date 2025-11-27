@@ -213,10 +213,30 @@ def get_best_q3(facts, past_periods=None, doc_period_end=None) -> dict | None:
     return min(options, key=rank, default=None)
 
 
-def get_best_fy(facts, past_periods) -> dict | None:
+def get_best_fy(facts, past_periods=None, doc_period_end=None) -> dict | None:
     """
     Get best full-year fact from collection.
+    Prefers facts with end_date closest to doc_period_end if provided.
     """
     options = [f for f in facts if f.get("mode") in ("year", "quarter", "period")]
+    if not options:
+        return None
+
+    # If doc_period_end provided, filter by mode preference then by date distance
+    if doc_period_end:
+        # Group by mode
+        year_options = [f for f in options if f.get("mode") == "year"]
+        quarter_options = [f for f in options if f.get("mode") == "quarter"]
+        period_options = [f for f in options if f.get("mode") == "period"]
+
+        # Prefer year mode, pick closest to doc_period_end
+        if year_options:
+            return min(year_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        if quarter_options:
+            return min(quarter_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        if period_options:
+            return min(period_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+    # Fallback to mode preference without date filtering
     rank = {"year": 0, "quarter": 1, "period": 2}
     return min(options, key=lambda f: rank.get(f["mode"], 99), default=None)

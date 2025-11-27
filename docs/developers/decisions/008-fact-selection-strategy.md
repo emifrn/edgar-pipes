@@ -134,15 +134,30 @@ def get_best_q3(facts, past_periods=None, doc_period_end=None):
 
 #### FY Selection
 ```python
-def get_best_fy(facts, past_periods) -> dict | None:
+def get_best_fy(facts, past_periods=None, doc_period_end=None) -> dict | None:
     options = [f for f in facts if f.get("mode") in ("year", "quarter", "period")]
+    if not options:
+        return None
+
+    # If doc_period_end provided, filter by mode preference then by date distance
+    if doc_period_end:
+        year_options = [f for f in options if f.get("mode") == "year"]
+        quarter_options = [f for f in options if f.get("mode") == "quarter"]
+        period_options = [f for f in options if f.get("mode") == "period"]
+
+        if year_options:
+            return min(year_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        if quarter_options:
+            return min(quarter_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        if period_options:
+            return min(period_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+    # Fallback to mode preference
     rank = {"year": 0, "quarter": 1, "period": 2}
     return min(options, key=lambda f: rank.get(f["mode"], 99), default=None)
 ```
 
-**Strategy:** Prefer year mode, fall back to quarter or period.
-
-**Known issue:** Doesn't use `doc_period_end` for disambiguation, so may select wrong year when filing contains multiple FY facts (current + comparative).
+**Strategy:** Prefer year mode, disambiguate with doc_period_end when multiple year facts exist, fall back to quarter or period.
 
 ### Date Distance Calculation
 
@@ -176,11 +191,7 @@ def _date_distance(end_date, doc_period_end_str):
    - Could be unified for consistency
    - Current Q3 logic assumes YTD derivation more accurate
 
-2. **FY selection incomplete:** Doesn't use doc_period_end
-   - May select wrong year when comparative FY facts present
-   - Should be fixed for consistency
-
-3. **No validation of derivation dependencies:**
+2. **No validation of derivation dependencies:**
    - When selecting semester for Q2, assumes Q1 exists and is valid
    - When selecting threeQ for Q3, assumes prior periods exist
    - Actual derivation happens later in report.py, errors may surface late
@@ -196,6 +207,17 @@ def _date_distance(end_date, doc_period_end_str):
 - **Problem:** `get_best_q2` preferred semester when `has_q1=True`, even if quarter existed
 - **Fix:** Check quarter candidates first, use semester only as fallback
 - **Impact:** BKE Q2 2025 now uses $73.9M (direct quarter) instead of $141M (6M YTD)
+
+**Bug #2c: FY comparative period selection**
+- **Problem:** `get_best_fy` didn't use `doc_period_end`, selected FY comparative instead of current year
+- **Example:** BKE FY 2022 filing contained 3 years of data:
+  - SellingAndMarketingExpense FY 2022: $293.9M (2022-01-30 to 2023-01-29)
+  - SellingAndMarketingExpense FY 2021: $266.4M (2021-01-31 to 2022-01-30)
+  - SellingAndMarketingExpense FY 2020: $191.2M (2020-02-02 to 2021-01-31) ← selected!
+  - System selected FY 2020 value ($191.2M) instead of FY 2022 ($293.9M)
+- **Impact:** Q4 derivation produced negative values: Q4 = 191.2 - (Q1 + Q2 + Q3) = -18.2M
+- **Fix:** Added `doc_period_end` parameter to `get_best_fy`, prefers fact with closest end_date
+- **Result:** FY 2022 now correctly selects $293.9M, Q4 = 293.9 - 209.4 = 84.5M (positive!)
 
 ## Examples
 
@@ -254,11 +276,7 @@ Selection using doc_period_end = 2025-08-02:
 
 ### High Priority
 
-1. **Add doc_period_end to FY selection**
-   - Currently missing, may select wrong year for comparative FY facts
-   - Simple fix: follow same pattern as Q1/Q2 selection
-
-2. **Validate derivation dependencies**
+1. **Validate derivation dependencies**
    - When selecting YTD mode, verify required prior periods exist
    - Return error or warning if derivation impossible
 
