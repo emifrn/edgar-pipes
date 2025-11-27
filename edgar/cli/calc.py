@@ -4,15 +4,15 @@ CLI: calc
 Calculate new columns based on arithmetic expressions.
 Evaluates expressions on each row and adds computed columns to the data.
 
-Column references use concept names (without units). The calc command automatically
-handles unit suffixes like (K), ($), etc. from report output.
+The calc command strips unit suffixes from column names (e.g., "(K)", "($)", "(%)")
+before evaluation, so expressions reference simple concept names without units.
 
 Examples:
-    edgar report -t aeo -g Balance | calc "Current ratio = Current assets / Current liabilities"
-    edgar report -t aeo -g Balance | calc "Working capital = Current assets - Current liabilities"
-    edgar report -t aeo -g Balance | calc "Debt to equity = Total liabilities / Stockholders equity"
-    edgar report -t bke -g Balance | calc -z "Cash = Cash.Unrestricted + Cash.Total"
-    edgar report -t bke -g Operations | calc "Gross margin = GrossProfit / Revenue * 100"
+    ep report -t aeo -g Balance | calc "Current ratio = Current assets / Current liabilities"
+    ep report -t bke -g Operations | calc "Gross margin = (Revenue - COGS) / Revenue * 100"
+    ep report -t bke -g Operations | calc "Net margin = Income.Net / Revenue * 100"
+
+Note: Even if report shows "Revenue (K)", reference it as just "Revenue" in formulas.
 """
 
 import re
@@ -43,6 +43,12 @@ def add_arguments(subparsers):
         action="store_true",
         help="treat NULL values as 0 in arithmetic operations"
     )
+    parser_calc.add_argument(
+        "-c", "--cols",
+        metavar="X",
+        nargs="+",
+        help="filter output columns (metadata columns FY, Period, Mode always included)"
+    )
     parser_calc.set_defaults(func=run)
 
 
@@ -70,19 +76,45 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
             return result
         parsed_expressions.append(result[1])
 
-    # Apply expressions to each row
+    # Strip units from column names in input data for cleaner calculations
+    # Convert {"Revenue (K)": 1000} -> {"Revenue": 1000}
     calculated_data = []
     for row in cmd["data"]:
-        new_row = dict(row)  # Copy original row
+        # Strip units from all column names
+        stripped_row = {}
+        for col_name, value in row.items():
+            base_name = _strip_units(col_name)
+            stripped_row[base_name] = value
 
+        # Apply expressions to stripped row
         for target_col, expression in parsed_expressions:
-            result = _evaluate_expression(expression, new_row, null_as_zero=args.null_as_zero)
+            result = _evaluate_expression(expression, stripped_row, null_as_zero=args.null_as_zero)
             if is_not_ok(result):
                 return err(f"calc: {result[1]} in row {row}")
 
-            new_row[target_col] = result[1]
+            stripped_row[target_col] = result[1]
 
-        calculated_data.append(new_row)
+        calculated_data.append(stripped_row)
+
+    # Apply column filtering if requested
+    if calculated_data:
+        # Metadata columns that should always be included
+        metadata_cols = ["FY", "Period", "Mode"]
+
+        # Build column list: metadata + requested columns (or all if none requested)
+        if args.cols:
+            # Include metadata columns + user-specified columns
+            cols_with_metadata = metadata_cols + [c for c in args.cols if c not in metadata_cols]
+            default_cols = list(calculated_data[0].keys())
+            result = cli.shared.process_cols(calculated_data, cols_with_metadata, default_cols)
+        else:
+            # No filtering - show all columns
+            default_cols = list(calculated_data[0].keys())
+            result = cli.shared.process_cols(calculated_data, None, default_cols)
+
+        if is_not_ok(result):
+            return result
+        calculated_data, _ = result[1]
 
     return ok({"name": "calc", "data": calculated_data})
 
@@ -145,7 +177,7 @@ def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: boo
 
     Args:
         expression: String like "Current assets / Current liabilities"
-        row: Data row with column values
+        row: Data row with column values (units already stripped)
         null_as_zero: If True, treat NULL values as 0 in arithmetic
 
     Returns:
@@ -156,65 +188,32 @@ def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: boo
     that only contains column values and safe math operations.
     """
 
-    # Build safe namespace with only row data
-    # Column names with spaces/special chars are accessed as variables
+    # Build safe namespace with row data
+    # Column names with spaces/special chars are converted to valid Python identifiers
     namespace = {}
-    col_mapping = {}  # Maps sanitized names back to original column names
 
     for col_name, value in row.items():
-        # Add the full column name (with units)
         var_name = _sanitize_column_name(col_name)
         namespace[var_name] = value
-        col_mapping[var_name] = col_name
 
-        # ALSO add the base name (without units) if units are present
-        base_name = _strip_units(col_name)
-        if base_name != col_name:
-            base_var_name = _sanitize_column_name(base_name)
-            # Only add if not already present (avoid conflicts)
-            if base_var_name not in namespace:
-                namespace[base_var_name] = value
-                col_mapping[base_var_name] = col_name
-
-    # Find all potential column names in the expression
-    # Check both with and without units
+    # Find all potential column names in the expression and check they exist
     missing_columns = []
     for potential_col in _extract_column_names(expression):
-        # Check if column exists as-is
         if potential_col not in row:
-            # Check if column exists when units are stripped
-            found = False
-            for actual_col in row.keys():
-                if _strip_units(actual_col) == potential_col:
-                    found = True
-                    break
-
-            if not found:
-                missing_columns.append(potential_col)
+            missing_columns.append(potential_col)
 
     # If any column is missing, return None
     if missing_columns:
         return ok(None)
 
     # Replace column references in expression with sanitized variable names
+    # Sort by length (longest first) to avoid partial matches
     modified_expression = expression
+    sorted_columns = sorted(row.keys(), key=len, reverse=True)
 
-    # Build list of all column variants (with and without units)
-    all_column_variants = []
-    for col_name in row.keys():
-        all_column_variants.append(col_name)
-        base_name = _strip_units(col_name)
-        if base_name != col_name:
-            all_column_variants.append(base_name)
-
-    # Remove duplicates and sort by length (longest first) to avoid partial matches
-    all_column_variants = sorted(set(all_column_variants), key=len, reverse=True)
-
-    for col_variant in all_column_variants:
-        var_name = _sanitize_column_name(col_variant)
-        # Only replace if the variable name exists in namespace
-        if var_name in namespace:
-            modified_expression = modified_expression.replace(col_variant, var_name)
+    for col_name in sorted_columns:
+        var_name = _sanitize_column_name(col_name)
+        modified_expression = modified_expression.replace(col_name, var_name)
 
     # Add safe math functions to namespace
     safe_functions = {
@@ -237,8 +236,7 @@ def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: boo
             if var_name not in safe_functions and namespace[var_name] is None:
                 namespace[var_name] = 0
     else:
-        # Check if any referenced column is missing (None value)
-        # This would cause issues in arithmetic
+        # Check if any referenced column has None value
         for var_name, value in namespace.items():
             if var_name in safe_functions:
                 continue  # Skip function names
