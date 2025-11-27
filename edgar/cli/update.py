@@ -284,11 +284,11 @@ def _choose_best_per_group(conn: sqlite3.Connection, cik: str, fiscal_year: str,
             # Flow variable: use period-based selection
             match (fiscal_period.upper() if isinstance(fiscal_period, str) else fiscal_period):
                 case "Q1":
-                    best = xbrl.facts.get_best_q1(items)
+                    best = xbrl.facts.get_best_q1(items, past_periods, doc_period_end)
                 case "Q2":
-                    best = xbrl.facts.get_best_q2(items, past_periods)
+                    best = xbrl.facts.get_best_q2(items, past_periods, doc_period_end)
                 case "Q3":
-                    best = xbrl.facts.get_best_q3(items, past_periods)
+                    best = xbrl.facts.get_best_q3(items, past_periods, doc_period_end)
                 case _:
                     best = xbrl.facts.get_best_fy(items, past_periods)
 

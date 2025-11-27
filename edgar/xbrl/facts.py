@@ -103,31 +103,105 @@ def is_consolidated(fact) -> bool:
     return not getattr(ctx, "hasSegment", False) and (dims is None or len(dims) == 0)
 
 
-def get_best_q1(facts) -> dict | None:
+def _date_distance(end_date, doc_period_end_str):
+    """
+    Calculate absolute difference between fact end_date and doc_period_end string.
+    Returns difference in days as integer for sorting.
+    """
+    from datetime import datetime, date
+
+    # Convert end_date to ISO string for comparison
+    if hasattr(end_date, 'isoformat'):
+        end_date_str = end_date.isoformat()
+    else:
+        end_date_str = str(end_date)
+
+    # Parse both as dates for proper comparison
+    try:
+        end_dt = datetime.fromisoformat(end_date_str).date() if isinstance(end_date_str, str) else end_date
+        doc_dt = datetime.fromisoformat(doc_period_end_str).date()
+        return abs((end_dt - doc_dt).days)
+    except:
+        # Fallback to string comparison if parsing fails
+        return 0 if end_date_str == doc_period_end_str else 999999
+
+
+def get_best_q1(facts, past_periods=None, doc_period_end=None) -> dict | None:
     """
     Get best Q1 fact from collection.
+    Prefers facts with end_date closest to doc_period_end if provided.
     """
-    return next((f for f in facts if f["mode"] == "quarter"), None)
+    candidates = [f for f in facts if f["mode"] == "quarter"]
+    if not candidates:
+        return None
+
+    # If doc_period_end provided, prefer fact with closest end_date
+    if doc_period_end:
+        return min(candidates, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+    return candidates[0]
 
 
-def get_best_q2(facts, past_periods) -> dict | None:
+def get_best_q2(facts, past_periods=None, doc_period_end=None) -> dict | None:
     """
     Get best Q2 fact from collection, considering past periods.
+    Prefers quarter-mode facts over semester (6M YTD) when available.
+    Falls back to semester only if no quarter fact exists.
+    Prefers facts with end_date closest to doc_period_end if provided.
     """
+    past_periods = past_periods or []
     has_q1 = any(p == "Q1" for _, p in past_periods)
-    preferred = [f for f in facts if f["mode"] == "semester"]
-    if preferred and has_q1:
-        return preferred[0]
-    return next((f for f in facts if f["mode"] == "quarter"), None)
+
+    # Look for direct quarter facts first
+    quarter_candidates = [f for f in facts if f["mode"] == "quarter"]
+    semester_candidates = [f for f in facts if f["mode"] == "semester"]
+
+    # Prefer quarter mode if available (direct Q2 reporting)
+    if quarter_candidates:
+        if doc_period_end:
+            return min(quarter_candidates, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        return quarter_candidates[0]
+
+    # Fall back to semester (6M YTD) only if we have Q1 and no quarter fact
+    if semester_candidates and has_q1:
+        if doc_period_end:
+            return min(semester_candidates, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+        return semester_candidates[0]
+
+    # No suitable facts found
+    return None
 
 
-def get_best_q3(facts, past_periods) -> dict | None:
+def get_best_q3(facts, past_periods=None, doc_period_end=None) -> dict | None:
     """
     Get best Q3 fact from collection, considering past periods.
+    Prefers facts with end_date closest to doc_period_end if provided.
     """
+    past_periods = past_periods or []
     past = {(m, p) for m, p in past_periods}
     options = [f for f in facts if f["mode"] in ("threeQ", "quarter")]
 
+    if not options:
+        return None
+
+    # If doc_period_end provided, filter options to those closest to it first
+    if doc_period_end:
+        # Group by mode, then pick closest within each mode
+        threeQ_options = [f for f in options if f["mode"] == "threeQ"]
+        quarter_options = [f for f in options if f["mode"] == "quarter"]
+
+        # Pick best threeQ if available and applicable
+        if threeQ_options and (("semester", "Q2") in past or (("quarter", "Q1") in past and ("quarter", "Q2") in past)):
+            return min(threeQ_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+        # Otherwise pick best quarter
+        if quarter_options:
+            return min(quarter_options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+        # Fallback to any option
+        return min(options, key=lambda f: _date_distance(f["end_date"], doc_period_end))
+
+    # Original logic without doc_period_end
     def rank(f):
         if f["mode"] == "threeQ":
             if ("semester", "Q2") in past or (("quarter", "Q1") in past and ("quarter", "Q2") in past):
