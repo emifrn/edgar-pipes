@@ -220,7 +220,13 @@ def resolve_concepts(conn: sqlite3.Connection, user_agent: str, cik: str, access
     cached_concepts = []
     for concept in role_concepts:
         # Insert concept if missing
-        concept_data = [{"cik": cik, "taxonomy": concept["taxonomy"], "tag": concept["tag"], "name": concept["name"]}]
+        concept_data = [{
+            "cik": cik,
+            "taxonomy": concept["taxonomy"],
+            "tag": concept["tag"],
+            "name": concept["name"],
+            "balance": concept.get("balance")  # Include balance attribute for Q4 derivation
+        }]
         result = db.store.insert_or_ignore(conn, "concepts", concept_data)
         if is_not_ok(result):
             continue  # Skip this concept, continue with others

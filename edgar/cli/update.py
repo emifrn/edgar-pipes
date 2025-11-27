@@ -222,7 +222,15 @@ def _facts_to_records(conn: sqlite3.Connection, cik: str, facts: Iterable[Any], 
             if name is None:
                 # Fallback to filing label or tag
                 name = getattr(getattr(f, "concept", None), "label", lambda: tag)()
-            concept_data = [{"cik": cik, "taxonomy": taxonomy, "tag": tag, "name": name}]
+            # Extract balance attribute for Q4 derivation logic
+            balance = getattr(getattr(f, "concept", None), "balance", None)
+            concept_data = [{
+                "cik": cik,
+                "taxonomy": taxonomy,
+                "tag": tag,
+                "name": name,
+                "balance": balance
+            }]
             result = db.store.insert_or_ignore(conn, "concepts", concept_data)
             if is_not_ok(result):
                 continue  # Skip this fact
