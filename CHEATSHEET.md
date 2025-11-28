@@ -12,7 +12,7 @@ Work with all commands:
 --json              # Output as JSONL
 --table             # Output as table
 --csv               # Output as CSV
---gp                # Output in gnuplot format (TSV with comment headers)
+--tsv               # Output as TSV (tab-separated values)
 --theme THEME       # Table theme (default, minimal, grid, financial, etc.)
 ```
 
