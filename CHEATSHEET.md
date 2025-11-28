@@ -207,6 +207,20 @@ ep report -t TICKER -g Operations | ep calc "Gross margin = GrossProfit / Revenu
 # Track margins over quarters
 ep report -t TICKER -g Operations --quarterly | \
   ep calc "Gross margin = GrossProfit / Revenue * 100"
+
+# Rolling window calculations (time series analysis)
+ep report -t TICKER -q -g Operations.EPS | \
+  ep calc "EPS.TTM = rolling_sum(\"EPS.Basic\")" -w 4
+# -w 4 = 4-quarter backward-looking window for trailing twelve months
+
+# Multiple rolling calculations
+ep report -t TICKER -q -g Operations | \
+  ep calc \
+    "Revenue.TTM = rolling_sum(\"Revenue\")" \
+    "Revenue.MA4 = rolling_avg(\"Revenue\")" \
+    -w 4
+
+# Available rolling functions: rolling_sum, rolling_avg, rolling_min, rolling_max
 ```
 
 ---
