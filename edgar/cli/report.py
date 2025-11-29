@@ -126,11 +126,10 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
 
         pivoted = result[1]
 
-        # Derive Q4 automatically
-        pivoted = _derive_q4(pivoted, facts)
-
         # Filter by period type if requested
         if args.quarterly:
+            # Derive quarters (Q2, Q3, Q4) only when -q flag is used
+            pivoted = _derive_quarters(pivoted, facts)
             pivoted = _filter_quarterly(pivoted)
         elif args.yearly:
             pivoted = _filter_yearly(pivoted)
@@ -216,9 +215,26 @@ def _pivot_facts(facts: list[dict[str, Any]]) -> Result[list[dict[str, Any]], st
         period_key = (fiscal_year, period_label, mode)
         period_data[period_key][concept_name] = value
 
+    # Helper: Define chronological period order
+    def period_sort_key(item):
+        """Sort periods chronologically: Q1, Q2, 6M YTD, Q3, 9M YTD, Q4, FY."""
+        fiscal_year, period_label, mode = item[0]
+        # Map period labels to chronological order (use decimals to sub-sort quarters before YTD)
+        order = {
+            "Q1": 1.0,
+            "Q2": 2.0,
+            "6M YTD": 2.1,  # After Q2
+            "Q3": 3.0,
+            "9M YTD": 3.1,  # After Q3
+            "Q4": 4.0,
+            "FY": 5.0,
+        }
+        period_order = order.get(period_label, 99)  # Unknown periods go last
+        return (fiscal_year, period_order, period_label)
+
     # Convert to list of dicts, ensuring all concepts appear as columns
     pivoted = []
-    for (fiscal_year, period_label, mode), concept_values in sorted(period_data.items()):
+    for (fiscal_year, period_label, mode), concept_values in sorted(period_data.items(), key=period_sort_key):
         # Normalize mode to semantic measurement type
         normalized_mode = "instant" if mode == "instant" else "flow"
 
@@ -267,16 +283,21 @@ def _round_to_decimals(value: float, decimals: str | None) -> float:
     return round(value)
 
 
-def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _derive_quarters(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Derive Q4 values automatically when possible.
+    Derive missing quarters (Q2, Q3, Q4) from YTD data when -q flag is used.
 
-    Logic:
-    - Stock variables (mode="instant"): Copy FY value to Q4
-    - Flow variables: Calculate Q4 = FY - 9M_YTD (if 9M YTD exists)
-                      OR Q4 = FY - (Q1 + Q2 + Q3) (if all quarters exist)
+    Logic for flow variables (cumulative flows with balance attribute):
+    - Q2 = 6M YTD - Q1 (if both exist)
+    - Q3 = 9M YTD - 6M YTD (if both exist) OR 9M YTD - Q1 - Q2 (if Q1, Q2 exist)
+    - Q4 = FY - 9M YTD (if both exist) OR FY - Q1 - Q2 - Q3 (if all exist)
 
-    Note: Most companies report Q1 quarter + 9M YTD + FY, so we can derive Q4 = FY - 9M_YTD
+    Logic for stock variables (mode="instant"):
+    - Copy snapshot values to quarterly labels (no calculation)
+
+    Conservative approach:
+    - Only derive for concepts with balance="debit"/"credit" or EPS tags
+    - Copy FY/YTD value for weighted averages (not derivable)
     """
     # Determine which concepts are stock (instant) vs flow (period-based)
     concept_modes: dict[str, str] = {}
@@ -305,23 +326,62 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
         fiscal_period = row["fiscal_period"]
         year_data[fiscal_year][fiscal_period] = row
 
-    # Derive Q4 for each year
+    # Derive missing quarters (Q2, Q3, Q4) for each year
     output = list(pivoted)  # Start with original data
 
     for fiscal_year, periods in year_data.items():
-        if "FY" not in periods:
-            continue  # Need FY to derive Q4
-
-        fy_row = periods["FY"]
+        fy_row = periods.get("FY", {})
         q1_row = periods.get("Q1", {})
         q2_row = periods.get("Q2", {})
         q3_row = periods.get("Q3", {})
+        ytd_6m_row = periods.get("6M YTD", {})
         ytd_9m_row = periods.get("9M YTD", {})
 
-        # Get metadata for Q4 derivation
-        concept_decimals = fy_row.get("_concept_decimals", {})
-        concept_balance = fy_row.get("_concept_balance", {})
-        concept_tag = fy_row.get("_concept_tag", {})
+        # Get metadata for quarter derivation (prefer FY, fallback to any available row)
+        metadata_row = fy_row or ytd_9m_row or ytd_6m_row or q1_row
+        if not metadata_row:
+            continue  # No data for this year
+        concept_decimals = metadata_row.get("_concept_decimals", {})
+        concept_balance = metadata_row.get("_concept_balance", {})
+        concept_tag = metadata_row.get("_concept_tag", {})
+
+        # Derive Q2 if missing and 6M YTD exists
+        if "Q2" not in periods and ytd_6m_row and q1_row:
+            q2_row_derived = _derive_quarter_by_subtraction(
+                fiscal_year, "Q2", all_concepts, concept_modes,
+                concept_decimals, concept_balance, concept_tag,
+                minuend=ytd_6m_row, subtrahend=q1_row
+            )
+            if q2_row_derived:
+                output.append(q2_row_derived)
+                periods["Q2"] = q2_row_derived  # Update for later use
+
+        # Derive Q3 if missing and 9M YTD exists
+        if "Q3" not in periods and ytd_9m_row:
+            # Prefer: Q3 = 9M YTD - 6M YTD
+            if ytd_6m_row:
+                q3_row_derived = _derive_quarter_by_subtraction(
+                    fiscal_year, "Q3", all_concepts, concept_modes,
+                    concept_decimals, concept_balance, concept_tag,
+                    minuend=ytd_9m_row, subtrahend=ytd_6m_row
+                )
+            # Fallback: Q3 = 9M YTD - Q1 - Q2
+            elif q1_row and periods.get("Q2"):
+                q3_row_derived = _derive_quarter_by_double_subtraction(
+                    fiscal_year, "Q3", all_concepts, concept_modes,
+                    concept_decimals, concept_balance, concept_tag,
+                    minuend=ytd_9m_row, sub1=q1_row, sub2=periods["Q2"]
+                )
+            else:
+                q3_row_derived = None
+
+            if q3_row_derived:
+                output.append(q3_row_derived)
+                periods["Q3"] = q3_row_derived  # Update for later use
+
+        # Derive Q4 if missing and FY exists
+        if "Q4" in periods or not fy_row:
+            continue  # Q4 already exists or can't derive
 
         # Create Q4 row with all concepts initialized to None
         q4_row = {
@@ -360,25 +420,17 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
                 balance = concept_balance.get(concept_name)
                 tag = concept_tag.get(concept_name, "")
 
-                # Decide derivation strategy based on XBRL metadata (conservative approach):
-                # 1. If balance is debit/credit → cumulative flow (revenue, expenses) → derive Q4
-                # 2. If tag contains "average" → weighted average → copy FY value
-                # 3. If tag contains "earningspershare" → EPS exception → derive Q4
-                # 4. Otherwise → conservative default → copy FY (unknown metrics)
+                # Derive if:
+                # 1. Has balance attribute (debit/credit) - typical for balance sheet rollforwards
+                # 2. Is EPS metric
+                # 3. Has no balance attribute (typical for cash flow) AND is not an average
+                # Do NOT derive if tag contains "average" (weighted averages are not additive)
+                is_balance_item = balance in ("debit", "credit")
+                is_eps = "earningspershare" in tag.lower()
+                is_flow_without_balance = balance is None
+                is_average = "average" in tag.lower()
 
-                should_derive = False  # Conservative default
-                if balance in ("debit", "credit"):
-                    # Cumulative flow with balance type: derive Q4 by subtraction
-                    should_derive = True
-                elif "average" in tag.lower():
-                    # Weighted average or similar: copy FY value
-                    should_derive = False
-                elif "earningspershare" in tag.lower():
-                    # EPS is a critical ratio that IS derivable: derive Q4
-                    should_derive = True
-                else:
-                    # Conservative default for unknown metrics: copy FY
-                    should_derive = False
+                should_derive = (is_balance_item or is_eps or is_flow_without_balance) and not is_average
 
                 if not should_derive:
                     # Copy FY value (weighted averages)
@@ -418,6 +470,110 @@ def _derive_q4(pivoted: list[dict[str, Any]], facts: list[dict[str, Any]]) -> li
     output.sort(key=lambda x: (x["fiscal_year"], period_order.get(x["fiscal_period"], 99)))
 
     return output
+
+
+def _derive_quarter_by_subtraction(
+    fiscal_year: str, quarter_label: str, all_concepts: set,
+    concept_modes: dict, concept_decimals: dict,
+    concept_balance: dict, concept_tag: dict,
+    minuend: dict, subtrahend: dict
+) -> dict[str, Any] | None:
+    """Helper: Derive quarter = minuend - subtrahend."""
+    return _derive_quarter_multi_sub(
+        fiscal_year, quarter_label, all_concepts, concept_modes,
+        concept_decimals, concept_balance, concept_tag,
+        minuend, [subtrahend]
+    )
+
+
+def _derive_quarter_by_double_subtraction(
+    fiscal_year: str, quarter_label: str, all_concepts: set,
+    concept_modes: dict, concept_decimals: dict,
+    concept_balance: dict, concept_tag: dict,
+    minuend: dict, sub1: dict, sub2: dict
+) -> dict[str, Any] | None:
+    """Helper: Derive quarter = minuend - sub1 - sub2."""
+    return _derive_quarter_multi_sub(
+        fiscal_year, quarter_label, all_concepts, concept_modes,
+        concept_decimals, concept_balance, concept_tag,
+        minuend, [sub1, sub2]
+    )
+
+
+def _derive_quarter_multi_sub(
+    fiscal_year: str, quarter_label: str, all_concepts: set,
+    concept_modes: dict, concept_decimals: dict,
+    concept_balance: dict, concept_tag: dict,
+    minuend: dict, subtrahends: list[dict]
+) -> dict[str, Any] | None:
+    """Core logic: Derive quarter by subtracting multiple rows from minuend."""
+    quarter_row = {
+        "fiscal_year": fiscal_year,
+        "fiscal_period": quarter_label,
+        "mode": "flow",
+        "_concept_decimals": concept_decimals,
+        "_concept_balance": concept_balance,
+        "_concept_tag": concept_tag,
+    }
+
+    has_flow = False
+    has_stock = False
+
+    for concept_name in all_concepts:
+        minuend_value = minuend.get(concept_name)
+        if minuend_value is None:
+            quarter_row[concept_name] = None
+            continue
+
+        is_stock = concept_modes.get(concept_name) == "instant"
+
+        if is_stock:
+            # Stock variable: copy snapshot
+            quarter_row[concept_name] = minuend_value
+            has_stock = True
+        else:
+            # Flow variable: decide if derivable
+            has_flow = True
+            balance = concept_balance.get(concept_name)
+            tag = concept_tag.get(concept_name, "")
+
+            # Derive if:
+            # 1. Has balance attribute (debit/credit) - typical for balance sheet rollforwards
+            # 2. Is EPS metric
+            # 3. Has no balance attribute (typical for cash flow) AND is not an average
+            # Do NOT derive if tag contains "average" (weighted averages are not additive)
+            is_balance_item = balance in ("debit", "credit")
+            is_eps = "earningspershare" in tag.lower()
+            is_flow_without_balance = balance is None
+            is_average = "average" in tag.lower()
+
+            should_derive = (is_balance_item or is_eps or is_flow_without_balance) and not is_average
+
+            if not should_derive:
+                quarter_row[concept_name] = minuend_value
+            else:
+                # Derive by subtraction
+                can_derive = True
+                subtrahend_sum = 0
+                for sub in subtrahends:
+                    val = sub.get(concept_name)
+                    if val is None:
+                        can_derive = False
+                        break
+                    subtrahend_sum += val
+
+                if can_derive:
+                    derived = minuend_value - subtrahend_sum
+                    quarter_row[concept_name] = _round_to_decimals(
+                        derived, concept_decimals.get(concept_name)
+                    )
+                else:
+                    quarter_row[concept_name] = None
+
+    if has_stock and not has_flow:
+        quarter_row["mode"] = "instant"
+
+    return quarter_row
 
 
 def _filter_quarterly(pivoted: list[dict[str, Any]]) -> list[dict[str, Any]]:

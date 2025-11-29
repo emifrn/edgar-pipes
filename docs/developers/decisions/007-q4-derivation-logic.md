@@ -1,6 +1,6 @@
 # ADR 007: Q4 Derivation Logic Using XBRL Metadata
 
-**Status:** Accepted
+**Status:** Superseded by ADR 009
 **Date:** 2025-11-23
 **Deciders:** Core team
 
