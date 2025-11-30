@@ -192,9 +192,34 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
 
     if len(groups_to_process) > len(requested_groups):
         added = set(groups_to_process) - set(requested_groups)
-        print(f"Added {len(added)} parent group(s): {', '.join(sorted(added))}")
+        print(f"Added {len(added)} parent group(s): {', '.join(sorted(added))}\n")
 
-    print(f"Build order: {', '.join(groups_to_process)}\n")
+    # Separate main and derived groups for display
+    main_groups = [g for g in groups_to_process if "from" not in groups_config.get(g, {})]
+    derived_groups = [g for g in groups_to_process if "from" in groups_config.get(g, {})]
+
+    if main_groups:
+        print(f"Main groups ({len(main_groups)}):")
+        for group in main_groups:
+            print(f"  - {group}")
+        print()
+
+    if derived_groups:
+        print(f"Derived groups ({len(derived_groups)}):")
+        # Group by parent
+        by_parent = {}
+        for group in derived_groups:
+            parent = groups_config[group]["from"]
+            if parent not in by_parent:
+                by_parent[parent] = []
+            by_parent[parent].append(group)
+
+        # Print grouped by parent
+        for parent in sorted(by_parent.keys()):
+            print(f"  from {parent}:")
+            for group in by_parent[parent]:
+                print(f"    - {group}")
+        print()
 
     # Connect to database
     cik = config.get_cik(cfg)
@@ -213,6 +238,8 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         conn.close()
         return err(f"cli.build.run_build: failed to resolve entity: {result[1]}")
 
+    _, _ = result[1]  # Don't need the data, just ensuring it exists
+
     # Determine cutoff date for filing fetch (default: 10 years ago)
     from datetime import datetime, timedelta
     cutoff = cfg.get("cutoff")
@@ -228,8 +255,11 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         conn.close()
         return err(f"cli.build.run_build: failed to fetch filings: {result[1]}")
 
-    all_filings = result[1]
-    print(f"cached {len(all_filings)} filings\n")
+    all_filings, source = result[1]
+    if source == "sec":
+        print(f"cached {len(all_filings)} filings\n")
+    else:
+        print(f"found {len(all_filings)} filings\n")
 
     if not all_filings:
         conn.commit()
@@ -240,6 +270,9 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
     # Step 4.5: Probe all roles for all filings upfront (cache role names)
     print(f"Probing roles for {len(all_filings)} filing(s)...")
     total_roles = 0
+    fetched_count = 0
+    cached_count = 0
+
     for i, filing in enumerate(all_filings, 1):
         access_no = filing["access_no"]
         filing_date = filing.get("filing_date", "?")
@@ -250,11 +283,22 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
             print(f"failed: {result[1]}")
             continue
 
-        roles = result[1]
+        roles, source = result[1]
         total_roles += len(roles)
-        print(f"cached {len(roles)} roles")
 
-    print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles cached\n")
+        if source == "sec":
+            print(f"cached {len(roles)} roles")
+            fetched_count += 1
+        else:
+            print(f"found {len(roles)} roles")
+            cached_count += 1
+
+    if fetched_count > 0 and cached_count > 0:
+        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles ({fetched_count} from SEC, {cached_count} from DB)\n")
+    elif fetched_count > 0:
+        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles (all from SEC)\n")
+    else:
+        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles (all from DB)\n")
 
     # Process groups one at a time
     for i, group_name in enumerate(groups_to_process, 1):
@@ -403,6 +447,7 @@ def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_n
             result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
             if is_not_ok(result):
                 print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date}: WARN probing concepts for {role_tail}")
+            # Don't need to extract the data here, just ensuring concepts are cached
 
         # Extract facts for this group
         result = _update_filing(conn, cik, access_no, role_map_filtered)

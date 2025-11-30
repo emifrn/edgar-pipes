@@ -94,12 +94,12 @@ def probe_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         if is_not_ok(result):
             print(f"failed: {result[1]}", file=sys.stderr)
             continue  # Best effort - continue with other tickers
-        
-        entities = result[1]
+
+        entities, _ = result[1]
         if not entities:
             print("not found", file=sys.stderr)
             continue
-        
+
         entity = entities[0]
         date_filters = cli.shared.parse_date_constraints(args.date, 'filing_date')
         result = cache.resolve_filings(conn,
@@ -111,9 +111,10 @@ def probe_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         if is_not_ok(result):
             print(f"failed: {result[1]}", file=sys.stderr)
             continue
-        
-        print(f"cached {len(result[1])} filings", file=sys.stderr)
-        filings.extend(result[1])
+
+        filings_data, _ = result[1]
+        print(f"cached {len(filings_data)} filings", file=sys.stderr)
+        filings.extend(filings_data)
     
     # Probe commands are for discovery/caching only - no data output
     return ok(None)
@@ -149,8 +150,8 @@ def probe_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
         if is_not_ok(result):
             print(f"failed: {result[1]}", file=sys.stderr)
             continue
-        
-        roles = result[1]
+
+        roles, _ = result[1]
         
         # Get filing info for context
         result = db.queries.filings.get_with_entity(conn, access_no)
@@ -223,8 +224,8 @@ def probe_concepts(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
         if is_not_ok(result):
             print(f"failed: {result[1]}", file=sys.stderr)
             continue  # Best effort - continue with other pairs
-        
-        concepts = result[1]
+
+        concepts, _ = result[1]
         concept_count = len(concepts)
         
         # Build summary record

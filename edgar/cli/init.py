@@ -170,7 +170,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
             conn.close()
             return err(f"cli.init.run: failed to fetch company from SEC: {result[1]}")
 
-        entities = result[1]
+        entities, _ = result[1]
         if not entities:
             conn.close()
             return err(f"cli.init.run: ticker '{ticker}' not found in SEC database")
