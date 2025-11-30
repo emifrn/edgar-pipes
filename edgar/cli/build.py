@@ -498,6 +498,13 @@ def roles(conn, cik: str, roles_config: dict) -> Result[None, str]:
         pattern = role_spec["pattern"]
         note = role_spec.get("note", "")
 
+        # Show what we're adding
+        print(f"  Role pattern:")
+        print(f"    Name: {role_name}")
+        print(f"    Pattern: {pattern}")
+        if note:
+            print(f"    Note: {note}")
+
         # Try to insert (idempotent - ignore if exists)
         result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
         if is_not_ok(result):
