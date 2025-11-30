@@ -15,8 +15,6 @@ def add_arguments(parser):
     """Define the CLI interface and register all available subcommands."""
 
     # Global options for main edgar command
-    parser.add_argument("-j", "--journal", nargs="?", const="default", metavar="NAME",
-                       help="record command to journal (default: journals/default.jsonl, or journals/NAME.jsonl)")
     parser.add_argument("-d", "--debug", action="store_true", help="print pipeline data to stderr")
 
     # Add mutually exclusive format options as global flags
@@ -39,18 +37,19 @@ def add_arguments(parser):
     subparsers = parser.add_subparsers()
 
     # Register subcommands from their respective modules
+    cli.init.add_arguments(subparsers)
+    cli.build.add_arguments(subparsers)
+    cli.setup.add_arguments(subparsers)
     cli.add.add_arguments(subparsers)
     cli.new.add_arguments(subparsers)
     cli.probe.add_arguments(subparsers)
     cli.select.add_arguments(subparsers)
     cli.delete.add_arguments(subparsers)
-    cli.journal.add_arguments(subparsers)
     cli.modify.add_arguments(subparsers)
     cli.update.add_arguments(subparsers)
     cli.report.add_arguments(subparsers)
     cli.calc.add_arguments(subparsers)
     cli.stats.add_arguments(subparsers)
-    cli.config.add_arguments(subparsers)
 
 
 def get_output_format(args):
@@ -91,20 +90,18 @@ def cli_main(args):
         # Extract packet and context
         input_packet, input_context = stdin_result[1]
 
-        # Load workspace configuration from ft.toml
+        # Load workspace configuration from ep.toml
         try:
-            workspace_root, workspace_config = config.load_workspace_config(
-                input_context.get("workspace")
-            )
+            workspace_root, ep_config = config.load_toml(input_context.get("workspace"))
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             return
 
         # Set workspace paths in args for commands
         args.workspace_root = workspace_root
-        args.workspace_config = workspace_config
-        args.db_path = config.get_db_path(workspace_root, workspace_config)
-        args.default_ticker = config.get_default_ticker(workspace_config)
+        args.ep_config = ep_config
+        args.db_path = config.get_db_path(workspace_root, ep_config)
+        args.default_ticker = config.get_ticker(ep_config)
 
         # Build context for output (workspace root propagates through pipeline)
         context = {"workspace": str(workspace_root)}
@@ -116,20 +113,9 @@ def cli_main(args):
         cmd = packet["cmd"] if input_packet else {"name": "", "data": []}
         result = args.func(cmd, args)
 
-        # Get history path for automatic recording (always on)
-        history_path = config.get_history_path()
-
         # Handle command result
         if is_not_ok(result):
             error_msg = result[1]
-
-            # Always write to history (tmp)
-            cli.journal.write_entry(history_path, packet["pipeline"], "ERROR", error_msg)
-
-            # Conditionally write to explicit journal
-            if hasattr(args, 'journal') and args.journal:
-                journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
-                cli.journal.write_entry(journal_path, packet["pipeline"], "ERROR", error_msg)
 
             if pipeline.output_format() == 'packet':
                 print(pipeline.err(error_msg))
@@ -138,14 +124,7 @@ def cli_main(args):
 
         elif result[1] is None:
             # Command completed with no data output
-
-            # Always write to history (tmp)
-            cli.journal.write_entry(history_path, packet["pipeline"], "OK", None)
-
-            # Conditionally write to explicit journal
-            if hasattr(args, 'journal') and args.journal:
-                journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
-                cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
+            pass
 
         else:
             # Command returned data - handle format override or continue pipeline
@@ -181,43 +160,15 @@ def cli_main(args):
                     theme_name = args.theme if args.theme else None
                     print(cli.format.as_table(result[1]["data"], theme_name))
 
-                # Always write to history (tmp)
-                cli.journal.write_entry(history_path, packet["pipeline"], "OK", None)
-
-                # Conditionally write to explicit journal
-                if hasattr(args, 'journal') and args.journal:
-                    journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
-                    cli.journal.write_entry(journal_path, packet["pipeline"], "OK", None)
-
     except KeyboardInterrupt:
         print("main: keyboard interrupt", file=sys.stderr)
     except Exception as e:
         error_msg = f"main: unexpected error: {e}"
-        # Best effort history write
-        try:
-            history_path = config.get_history_path()
-            cli.journal.write_entry(history_path, [current_cmd], "ERROR", error_msg)
-
-            # Also write to explicit journal if requested
-            if 'args' in locals() and hasattr(args, 'journal') and args.journal:
-                if 'workspace_root' in locals() and 'workspace_config' in locals():
-                    journal_path = config.get_journal_path(workspace_root, workspace_config, args.journal)
-                    cli.journal.write_entry(journal_path, [current_cmd], "ERROR", error_msg)
-        except:
-            pass  # Don't fail on journal errors during exception handling
         print(error_msg, file=sys.stderr)
 
 
 def main():
     """Entry point for console script."""
-    # Load configuration
-    cfg = config.load_config()
-
-    # Check if user_agent is still default (first run - needs setup)
-    if cfg["edgar"]["user_agent"] == "edgar-pipes/0.3.0":
-        config.init_config_interactive()
-        cfg = config.load_config()
-
     parser = argparse.ArgumentParser(
         prog='ep',
         description='Analyze SEC XBRL financial data through progressive discovery and extraction',
@@ -228,65 +179,49 @@ Available themes:
     nobox-light, nobox-dark, nobox-minimal, nobox-minimal-light,
     nobox-minimal-dark
 
-Environment variables:
-  EDGAR_PIPES_USER_AGENT    User agent for SEC EDGAR API requests
-  EDGAR_PIPES_THEME         Default table theme
-
 Configuration:
-  User config: ~/.config/edgar-pipes/config.toml (user agent, theme)
-  Workspace config: ft.toml (database, journals, default ticker)
+  Workspace config: ep.toml (user agent, database, XBRL schema)
 
-  Use "ep config show" to view configuration
-  Use "ep config env" to view environment variables
+  edgar-pipes finds ep.toml by walking up from current directory
 
-Workspace (ft.toml):
-  edgar-pipes finds ft.toml by walking up from current directory
+Workspace setup:
+  # Initialize new workspace
+  mkdir aapl && cd aapl
+  ep init                       # Interactive setup, creates ep.toml
 
-  Create ft.toml in your workspace:
-
-  [workspace]
-  ticker = "AAPL"  # Optional: default ticker
-
-  [edgar-pipes]
-  database = "db/edgar.db"
-  journals = "src/journals"
+  # Validate and build
+  ep build -c                   # Validate configuration
+  ep build                      # Build database from ep.toml
+  ep build quick                # Build specific target
 
 Examples:
-  # Create workspace and ft.toml
-  mkdir aapl && cd aapl
-  cat > ft.toml <<EOF
-  [edgar-pipes]
-  database = "store.db"
-  journals = "journals"
-  EOF
-
-  ep probe filings -t AAPL --force
-  ep select patterns -t AAPL -g Balance
-  ep new group "Current Assets" --from Balance -t AAPL --uid 1 2 3
-
   # Pipeline commands (workspace propagates automatically)
   ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
 
-  # Record to journal
-  ep -j probe filings -t AAPL
-  ep -j setup new role -t AAPL -n balance -p 'PATTERN'
-
-  # View command history
-  ep history                    # System-wide history from /tmp
-  ep journal                    # View default journal
-  ep journal setup              # View setup journal
-  ep journal replay setup       # Replay setup journal
+  # Probe and explore
+  ep probe filings -t AAPL --force
+  ep select patterns -t AAPL -g Balance
 
 Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    parser.set_defaults(
-        config=cfg,
-        func=lambda cmd, args: err("No command specified. Use -h for help")
-    )
+    parser.set_defaults(func=lambda cmd, args: err("No command specified. Use -h for help"))
     add_arguments(parser)
     args = parser.parse_args()
 
-    cli_main(args)
+    # Workspace management commands bypass pipeline infrastructure
+    # - init: creates ep.toml (can't require workspace to exist)
+    # - build: builds database from ep.toml (requires workspace but not pipeline)
+    workspace_commands = ['edgar.cli.init', 'edgar.cli.build']
+
+    if args.func.__module__ in workspace_commands:
+        cmd = {"name": "", "data": []}
+        result = args.func(cmd, args)
+        if is_not_ok(result):
+            print(result[1], file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Pipeline commands - support stdin/stdout data flow
+        cli_main(args)
 
 
 if __name__ == "__main__":

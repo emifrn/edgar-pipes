@@ -1,131 +1,35 @@
 """Configuration management for edgar-pipes.
 
-Loads configuration with the following precedence (highest to lowest):
-1. Config file (~/.config/edgar-pipes/config.toml) - user agent, theme
-2. Workspace file (.ft.toml) - database, journals, default ticker
-3. Built-in defaults
+All configuration is now in a single ep.toml file at the workspace root.
+This file contains:
+- User preferences (user_agent, theme)
+- Database and company info (database, ticker, cik, name)
+- XBRL schema (roles, concepts, groups, targets)
 """
 
 import os
+import re
 import sys
 import tomllib
-from typing import Any
+from typing import Any, Dict, List, Tuple
 from pathlib import Path
 
 
 DEFAULT_CONFIG = {
-    "edgar": {
-        "user_agent": "edgar-pipes/0.3.2",  # Fallback (not ideal, prompt user)
-    },
-    "output": {
-        "theme": "nobox-minimal",
-    },
+    "user_agent": "edgar-pipes",  # Fallback (not ideal, prompt user)
+    "theme": "nobox-minimal",
 }
 
 
-def get_config_path() -> Path:
-    """Get config file path using XDG_CONFIG_HOME."""
-    xdg_config = os.environ.get("XDG_CONFIG_HOME", "~/.config")
-    return Path(xdg_config).expanduser() / "edgar-pipes" / "config.toml"
-
-
-def load_config() -> dict[str, Any]:
+def find_toml(start_dir: Path | None = None) -> Path | None:
     """
-    Load configuration with precedence:
-    1. Environment variables (highest) - user agent, theme only
-    2. Config file (~/.config/edgar-pipes/config.toml)
-    3. Built-in defaults (lowest)
-
-    Note: Workspace paths (database, journals) come from ft.toml, not this config.
-    """
-    # Start with defaults
-    config = {
-        "edgar": DEFAULT_CONFIG["edgar"].copy(),
-        "output": DEFAULT_CONFIG["output"].copy(),
-    }
-
-    # 1. Load from config file if it exists
-    config_path = get_config_path()
-    if config_path.exists():
-        try:
-            with open(config_path, "rb") as f:
-                file_config = tomllib.load(f)
-                # Merge file config into defaults
-                for section, values in file_config.items():
-                    if section in config and isinstance(values, dict):
-                        config[section].update(values)
-        except Exception as e:
-            print(f"Warning: Could not load config file: {e}", file=sys.stderr)
-
-    # 2. Override with environment variables (user agent and theme only)
-    env_overrides = {
-        "EDGAR_PIPES_USER_AGENT": ("edgar", "user_agent"),
-        "EDGAR_PIPES_THEME": ("output", "theme"),
-    }
-
-    for env_var, (section, key) in env_overrides.items():
-        value = os.getenv(env_var)
-        if value:
-            config[section][key] = value
-
-    return config
-
-
-def init_config_interactive() -> bool:
-    """
-    Interactive first-run configuration setup.
-    Returns True if config was created, False if it already exists.
-    """
-    config_path = get_config_path()
-
-    # Don't re-run if config already exists
-    if config_path.exists():
-        return False
-
-    print("\nWelcome to edgar-pipes!", file=sys.stderr)
-    print("\nThe SEC requires a user-agent for API requests.", file=sys.stderr)
-    print('Please provide your name and email (e.g., "John Doe john@example.com"):', file=sys.stderr)
-    print("> ", end="", file=sys.stderr)
-    user_agent = input().strip()
-
-    if not user_agent:
-        print("\nNo user-agent provided. Using default (not recommended).", file=sys.stderr)
-        return False
-
-    # Create config directory
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Write config file
-    config_content = f"""# Edgar-pipes configuration file
-
-[edgar]
-# Your identity for SEC EDGAR API requests
-user_agent = "{user_agent}"
-
-[output]
-# Default table theme
-theme = "nobox-minimal"
-"""
-
-    with open(config_path, "w") as f:
-        f.write(config_content)
-
-    print(f"\n✓ Configuration saved to {config_path}", file=sys.stderr)
-    print("  You can edit this file anytime to change settings.", file=sys.stderr)
-    print("  Use 'ep config show' to view current configuration.\n", file=sys.stderr)
-
-    return True
-
-
-def find_workspace_config(start_dir: Path | None = None) -> Path | None:
-    """
-    Find ft.toml by walking up directory tree from start_dir.
+    Find ep.toml by walking up directory tree from start_dir.
 
     Args:
         start_dir: Directory to start search from (default: current directory)
 
     Returns:
-        Path to ft.toml file if found, None otherwise
+        Path to ep.toml file if found, None otherwise
     """
     if start_dir is None:
         start_dir = Path.cwd()
@@ -134,9 +38,9 @@ def find_workspace_config(start_dir: Path | None = None) -> Path | None:
 
     # Walk up directory tree
     while True:
-        ft_config = current / "ft.toml"
-        if ft_config.exists():
-            return ft_config
+        ep_config = current / "ep.toml"
+        if ep_config.exists():
+            return ep_config
 
         # Check if we've reached the root
         parent = current.parent
@@ -147,136 +51,290 @@ def find_workspace_config(start_dir: Path | None = None) -> Path | None:
         current = parent
 
 
-def load_workspace_config(context_workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
+def load_toml(context_workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
     """
-    Load workspace configuration from ft.toml file.
+    Load workspace configuration from ep.toml file.
 
     Args:
         context_workspace: Workspace path from pipeline context (if available)
 
     Returns:
-        Tuple of (workspace_root, workspace_config)
+        Tuple of (root, cfg) - workspace root and configuration dict
 
     Raises:
-        RuntimeError: If no ft.toml file found
+        RuntimeError: If no ep.toml file found
     """
-    # If context provides workspace, use that directory to find ft.toml
+    # If context provides workspace, use that directory to find ep.toml
     if context_workspace:
         start_dir = Path(context_workspace)
     else:
         start_dir = Path.cwd()
 
-    ft_config_path = find_workspace_config(start_dir)
+    ep_config_path = find_toml(start_dir)
 
-    if ft_config_path is None:
-        error_msg = f"""No ft.toml workspace configuration found.
+    if ep_config_path is None:
+        error_msg = f"""No ep.toml workspace configuration found.
 
 Searched from: {start_dir}
 
-Create a ft.toml file in your workspace directory:
+Create an ep.toml file in your workspace directory using 'ep init':
 
-[workspace]
-ticker = "AAPL"  # Optional: default ticker
+  $ ep init
 
-[edgar-pipes]
-database = "db/edgar.db"
-journals = "src/journals"
-
-See https://github.com/emifrn/edgar-pipes for more information."""
+Or create one manually. See https://github.com/emifrn/edgar-pipes for more information."""
         raise RuntimeError(error_msg)
 
     # Load the TOML file
     try:
-        with open(ft_config_path, "rb") as f:
-            workspace_config = tomllib.load(f)
+        with open(ep_config_path, "rb") as f:
+            cfg = tomllib.load(f)
     except Exception as e:
-        raise RuntimeError(f"Error loading {ft_config_path}: {e}")
+        raise RuntimeError(f"Error loading {ep_config_path}: {e}")
 
-    # Validate required sections
-    if "edgar-pipes" not in workspace_config:
-        raise RuntimeError(f"{ft_config_path}: Missing required [edgar-pipes] section")
+    # Validate required fields
+    required_fields = ["database", "ticker", "cik"]
+    missing_fields = [field for field in required_fields if field not in cfg]
 
-    ep_config = workspace_config["edgar-pipes"]
-    if "database" not in ep_config:
-        raise RuntimeError(f"{ft_config_path}: Missing required 'database' in [edgar-pipes] section")
-    if "journals" not in ep_config:
-        raise RuntimeError(f"{ft_config_path}: Missing required 'journals' in [edgar-pipes] section")
+    if missing_fields:
+        raise RuntimeError(
+            f"{ep_config_path}: Missing required fields: {', '.join(missing_fields)}\n"
+            f"Run 'ep init' to create a valid configuration."
+        )
 
-    # Workspace root is the directory containing ft.toml
-    workspace_root = ft_config_path.parent
+    # Workspace root is the directory containing ep.toml
+    root = ep_config_path.parent
 
-    return workspace_root, workspace_config
+    return root, cfg
 
 
-def get_db_path(workspace_root: Path, workspace_config: dict[str, Any]) -> Path:
+def get_db_path(root: Path, cfg: dict[str, Any]) -> Path:
     """
-    Get database file path from workspace configuration.
+    Get database file path from ep.toml configuration.
 
     Args:
-        workspace_root: Directory containing ft.toml
-        workspace_config: Loaded workspace configuration
+        root: Workspace root directory containing ep.toml
+        cfg: Loaded ep.toml configuration
 
     Returns:
         Absolute path to database file
     """
-    db_path = workspace_config["edgar-pipes"]["database"]
-    return (workspace_root / db_path).resolve()
+    db_path = cfg["database"]
+    return (root / db_path).resolve()
 
 
-def get_journal_path(workspace_root: Path, workspace_config: dict[str, Any], journal_name: str = "default") -> Path:
+def get_ticker(cfg: dict[str, Any]) -> str:
     """
-    Get journal file path from workspace configuration.
+    Get ticker from ep.toml configuration.
 
     Args:
-        workspace_root: Directory containing ft.toml
-        workspace_config: Loaded workspace configuration
-        journal_name: Journal name (e.g., "default", "setup", "daily")
+        cfg: Loaded ep.toml configuration
 
     Returns:
-        Absolute path to journal file
+        Ticker string
     """
-    journals_dir = workspace_config["edgar-pipes"]["journals"]
-    journals_path = (workspace_root / journals_dir).resolve()
-    return journals_path / f"{journal_name}.jsonl"
+    return cfg["ticker"]
 
 
-def get_default_ticker(workspace_config: dict[str, Any]) -> str | None:
+def get_cik(cfg: dict[str, Any]) -> str:
     """
-    Get default ticker from workspace configuration if specified.
+    Get CIK from ep.toml configuration.
 
     Args:
-        workspace_config: Loaded workspace configuration
+        cfg: Loaded ep.toml configuration
 
     Returns:
-        Default ticker string or None if not specified
+        CIK string
     """
-    if "workspace" in workspace_config:
-        return workspace_config["workspace"].get("ticker")
-    return None
+    return cfg["cik"]
 
 
-def get_history_path() -> Path:
+def get_user_agent(cfg: dict[str, Any]) -> str:
     """
-    Get system-level history file path (ephemeral, in tmp).
-    Uses UID for multi-user safety.
+    Get user agent from ep.toml configuration.
+
+    Args:
+        cfg: Loaded ep.toml configuration
+
+    Returns:
+        User agent string, or default if not specified
     """
-    import tempfile
-
-    # Prefer XDG_RUNTIME_DIR (user-specific, secure)
-    runtime_dir = os.environ.get('XDG_RUNTIME_DIR')
-    if runtime_dir:
-        return Path(runtime_dir) / 'edgar-pipes-history.jsonl'
-
-    # Fallback to tmp with UID for multi-user safety
-    uid = os.getuid()
-    return Path(tempfile.gettempdir()) / f'edgar-pipes-{uid}.jsonl'
+    return cfg.get("user_agent", DEFAULT_CONFIG["user_agent"])
 
 
-def get_user_agent(config: dict) -> str:
-    """Get user agent for EDGAR API requests."""
-    return config["edgar"]["user_agent"]
+def get_theme(cfg: dict[str, Any]) -> str:
+    """
+    Get theme from ep.toml configuration.
+
+    Args:
+        cfg: Loaded ep.toml configuration
+
+    Returns:
+        Theme string, or default if not specified
+    """
+    return cfg.get("theme", DEFAULT_CONFIG["theme"])
 
 
-def get_theme(config: dict) -> str:
-    """Get the configured theme name."""
-    return config["output"]["theme"]
+# =============================================================================
+# Validation Functions
+# =============================================================================
+
+def validate(cfg: dict) -> Tuple[List[str], List[str]]:
+    """
+    Validate ep.toml structure and business rules.
+
+    Args:
+        cfg: Loaded ep.toml configuration
+
+    Returns:
+        (errors, warnings) tuple where errors are fatal, warnings are not
+    """
+    errors = []
+    warnings = []
+
+    # Run all validations
+    errors.extend(_validate_uids(cfg))
+    errors.extend(_validate_references(cfg))
+    errors.extend(_validate_patterns(cfg))
+    warnings.extend(_check_unused(cfg))
+
+    return errors, warnings
+
+
+def _validate_uids(cfg: dict) -> List[str]:
+    """Check UID uniqueness."""
+    errors = []
+    concepts = cfg.get("concepts", {})
+    uid_to_concepts: Dict[int, List[str]] = {}
+
+    for concept_name, concept_def in concepts.items():
+        if "uid" not in concept_def:
+            errors.append(f"Concept '{concept_name}' missing required 'uid' field")
+            continue
+
+        uid = concept_def["uid"]
+        if uid not in uid_to_concepts:
+            uid_to_concepts[uid] = []
+        uid_to_concepts[uid].append(concept_name)
+
+    for uid, concept_names in uid_to_concepts.items():
+        if len(concept_names) > 1:
+            errors.append(
+                f"Duplicate UID {uid} used by concepts: {', '.join(concept_names)}"
+            )
+
+    return errors
+
+
+def _validate_references(cfg: dict) -> List[str]:
+    """Check that all references (roles, concepts, groups) exist."""
+    errors = []
+    concepts = cfg.get("concepts", {})
+    groups = cfg.get("groups", {})
+    roles = cfg.get("roles", {})
+
+    all_concept_uids = set(c.get("uid") for c in concepts.values() if "uid" in c)
+    all_group_names = set(groups.keys())
+
+    # Validate group references
+    for group_name, group_def in groups.items():
+        # Check 'from' reference if present
+        from_group = group_def.get("from")
+        if from_group:
+            if from_group not in groups:
+                errors.append(f"Group '{group_name}' references undefined parent group '{from_group}'")
+                continue  # Skip further validation for this group
+
+        # Check role reference (required unless 'from' is set)
+        if "role" not in group_def and not from_group:
+            errors.append(f"Group '{group_name}' missing required 'role' field (required when 'from' is not set)")
+            continue
+
+        # If role is specified, validate it exists
+        if "role" in group_def:
+            role_ref = group_def["role"]
+            if role_ref not in roles:
+                errors.append(
+                    f"Group '{group_name}' references undefined role '{role_ref}'"
+                )
+
+        # Check concept UIDs
+        if "concepts" not in group_def:
+            errors.append(f"Group '{group_name}' missing required 'concepts' field")
+            continue
+
+        group_concepts = set(group_def["concepts"])
+        invalid_uids = group_concepts - all_concept_uids
+        if invalid_uids:
+            errors.append(
+                f"Group '{group_name}' references undefined concept UIDs: {sorted(invalid_uids)}"
+            )
+
+        # If derived from another group, validate concepts are subset of parent
+        if from_group and from_group in groups:
+            parent_concepts = set(groups[from_group].get("concepts", []))
+            invalid_concepts = group_concepts - parent_concepts
+            if invalid_concepts:
+                errors.append(
+                    f"Group '{group_name}' contains concepts not in parent group '{from_group}': {sorted(invalid_concepts)}"
+                )
+
+    return errors
+
+
+def _validate_patterns(cfg: dict) -> List[str]:
+    """Check that all regex patterns are valid."""
+    errors = []
+    roles = cfg.get("roles", {})
+    concepts = cfg.get("concepts", {})
+
+    for role_name, role_def in roles.items():
+        if "pattern" not in role_def:
+            errors.append(f"Role '{role_name}' missing required 'pattern' field")
+            continue
+
+        try:
+            re.compile(role_def["pattern"])
+        except re.error as e:
+            errors.append(f"Role '{role_name}' has invalid regex pattern: {e}")
+
+    for concept_name, concept_def in concepts.items():
+        if "pattern" not in concept_def:
+            errors.append(f"Concept '{concept_name}' missing required 'pattern' field")
+            continue
+
+        try:
+            re.compile(concept_def["pattern"])
+        except re.error as e:
+            errors.append(f"Concept '{concept_name}' has invalid regex pattern: {e}")
+
+    return errors
+
+
+def _check_unused(cfg: dict) -> List[str]:
+    """Warn about unused definitions."""
+    warnings = []
+    concepts = cfg.get("concepts", {})
+    groups = cfg.get("groups", {})
+    roles = cfg.get("roles", {})
+
+    all_concept_uids = set(c.get("uid") for c in concepts.values() if "uid" in c)
+    used_concept_uids = set()
+    for group_def in groups.values():
+        if "concepts" in group_def:
+            used_concept_uids.update(group_def["concepts"])
+
+    unused_uids = all_concept_uids - used_concept_uids
+    if unused_uids:
+        unused_names = [name for name, defn in concepts.items() if defn.get("uid") in unused_uids]
+        warnings.append(
+            f"Concepts defined but not used in any group: {', '.join(sorted(unused_names))}"
+        )
+
+    used_roles = set(g.get("role") for g in groups.values() if "role" in g)
+    unused_roles = set(roles.keys()) - used_roles
+    if unused_roles:
+        warnings.append(
+            f"Roles defined but not used in any group: {', '.join(sorted(unused_roles))}"
+        )
+
+    return warnings

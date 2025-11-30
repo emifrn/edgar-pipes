@@ -87,7 +87,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
 
         # Get ticker from database
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
         if not ticker:
             conn.close()
@@ -121,7 +121,7 @@ def run_add_concept(cmd: Cmd, args) -> Result[None, str]:
         # Validate at least one selection method
         has_from = args.source_group is not None
         has_id = args.uid is not None
-        has_names = hasattr(args, 'names') and args.names is not None
+        has_names = args.names is not None
         has_pattern = args.pattern is not None
         has_exclude = args.exclude is not None
 
@@ -185,7 +185,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
 
         # Get ticker from database
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
         if not ticker:
             conn.close()
@@ -218,7 +218,7 @@ def run_add_role(cmd: Cmd, args) -> Result[None, str]:
 
         # Validate at least one selection method
         has_from = args.source_group is not None
-        has_names = hasattr(args, 'names') and args.names is not None
+        has_names = args.names is not None
         has_pattern = args.pattern is not None
         has_exclude = args.exclude is not None
 

@@ -37,7 +37,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
         # Priority 1: Explicit ticker from command line
         # Priority 2: Default ticker from ft.toml
         tickers = args.ticker if args.ticker else (
-            [args.default_ticker] if hasattr(args, 'default_ticker') and args.default_ticker else None
+            [args.default_ticker] if args.default_ticker else None
         )
         result = db.queries.entities.select(conn, tickers)
         if is_not_ok(result):

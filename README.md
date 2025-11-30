@@ -33,12 +33,10 @@ based on previously defined groups, e.g. 'Balance', 'Balance.Assets',
 
 ### Reproducible workflows
 
-The ep command includes an explicit journaling system for recording command
-sessions. Use the `-j` flag to record commands to journals. The journaling
-system supports named journals and can replay workflows fully or partially via
-indexing syntax. Journals can be used as templates for new company analysis, as
-a compact backup system (storing commands instead of data), or they can be used
-as part of shareable company libraries
+edgar-pipes uses a declarative configuration approach with `ep.toml` files.
+All workspace settings, XBRL schema definitions (roles, concepts, groups), and
+targets are defined in a single TOML file that is human-readable and
+version-controllable.
 
 In short, edgar-pipes enables a progressive discovery workflow that allows
 users to:
@@ -152,74 +150,70 @@ pip install -e .
 
 See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
-### First Run Setup
+### Workspace Initialization
 
-The first time you run any `ep` command, you'll be prompted to configure your
-identity for SEC EDGAR API requests:
+Initialize a new workspace with the `ep init` command:
 
 ```bash
-$ ep probe filings -t AAPL
+$ mkdir aapl && cd aapl
+$ ep init
 
 Welcome to edgar-pipes!
 
+This will create an ep.toml configuration file in the current directory.
+
 The SEC requires a user-agent for API requests.
-Please provide your name and email (e.g., "John Doe john@example.com"):
-> Your Name your.email@example.com
+Your name and email (e.g., "John Doe john@example.com"): Your Name your.email@example.com
+Company ticker (e.g., AAPL): AAPL
+Database path (relative to ep.toml): [db/edgar.db]
 
-✓ Configuration saved to ~/.config/edgar-pipes/config.toml
-  You can edit this file anytime to change settings.
-  Use 'ep config show' to view current configuration.
+Initializing database: /home/user/aapl/db/edgar.db
+Fetching company information from SEC for AAPL...
+✓ Found company: Apple Inc. (CIK: 0000320193)
+✓ Created /home/user/aapl/ep.toml
+
+✓ Workspace initialized successfully!
+
+Company: Apple Inc.
+Ticker: AAPL
+CIK: 0000320193
+Database: /home/user/aapl/db/edgar.db
+
+Next steps:
+  1. Run 'ep probe filings' to fetch SEC filings
+  2. Run 'ep probe concepts' to explore XBRL concepts
+  3. Edit ep.toml to define roles and concepts for your analysis
+  4. Run 'ep build -c' to validate configuration
+  5. Run 'ep build' to extract financial data
 ```
 
-This is a one-time setup. You can view or modify your configuration anytime:
-
-```bash
-# View current configuration
-ep config show
-
-# Edit configuration file directly
-nano ~/.config/edgar-pipes/config.toml
-```
+The `ep init` command:
+- Prompts for user-agent (required by SEC)
+- Prompts for company ticker
+- Fetches company information from SEC automatically
+- Creates database and initializes schema
+- Creates ep.toml configuration file with example roles and concepts
+- Workspace is ready for exploration immediately
 
 ### Working with Workspaces
 
-edgar-pipes uses workspaces to organize your analysis. A workspace is configured via a `ft.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
+edgar-pipes uses workspaces to organize your analysis. A workspace is configured via an `ep.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
 
-```bash
-# Create workspace directory
-mkdir aapl && cd aapl
-
-# Create ft.toml configuration
-cat > ft.toml <<EOF
-[workspace]
-ticker = "AAPL"  # Optional: default ticker
-
-[edgar-pipes]
-database = "store.db"
-journals = "journals"
-EOF
-
-# Start working - edgar-pipes finds ft.toml automatically
-ep probe filings -t AAPL  # Creates store.db
-ep -j new role -t AAPL -n balance -p 'PATTERN'  # Creates journals/default.jsonl
-```
-
-Typical directory structure:
+Typical directory structure after initialization:
 ```
 aapl/
-  ft.toml          # Workspace configuration
-  store.db          # SQLite database
-  journals/         # Journal files
-    default.jsonl
-    setup.jsonl
+  ep.toml          # Workspace configuration (user preferences, schema, targets)
+  db/
+    edgar.db       # SQLite database
 ```
 
 **Key features:**
-- Paths in `ft.toml` are relative to the `ft.toml` file location
-- edgar-pipes finds `ft.toml` by walking up from current directory
+- All configuration in single `ep.toml` file (user preferences, schema, targets)
+- Paths in `ep.toml` are relative to the `ep.toml` file location
+- edgar-pipes finds `ep.toml` by walking up from current directory
 - Workspace root propagates through pipelines automatically
-- Optional default ticker simplifies repetitive commands
-- `ft.toml` can be version-controlled for reproducible workflows
+- `ep.toml` can be version-controlled for reproducible workflows
+- Human-readable TOML format with comments for documentation
 
 ### Workflows
 
@@ -345,43 +339,6 @@ all groups at once.
 ep update -t <TICKER> -g <GROUP> --force
 ```
 
-#### Journals
-
-edgar-pipes provides explicit journaling for recording workflows. Use the `-j`
-flag to record commands to journals (default or named). All commands are also
-automatically recorded to system history (ephemeral, in tmp) for reference.
-
-```bash
-# Record to default journal (journals/default.jsonl)
-ep -j probe filings -t AAPL
-ep -j default new group Balance      # Same as -j
-
-# Record to named journals (journals/NAME.jsonl)
-ep -j setup probe filings -t AAPL
-ep -j daily update -t AAPL --force
-
-# View system history (automatic, from /tmp, cross-workspace)
-ep history
-ep history --limit 50
-ep history --errors
-ep history --pattern "probe.*AAPL"
-
-# View workspace journals
-ep journal                    # View default journal
-ep journal setup              # View setup journal
-ep journal daily --limit 10   # Last 10 entries from daily journal
-
-# Replay commands from journals
-ep journal replay             # Replay default journal
-ep journal replay setup       # Replay setup journal
-ep journal replay setup 5:10,13,15,18:22
-ep journal replay daily 1,5,8
-
-# Replay from different workspace (cd to it first - ft.toml is auto-discovered)
-cd ~/aapl
-ep journal replay setup
-```
-
 #### Reports
 
 The report command queries the existing data in the database and returns data in
@@ -425,6 +382,8 @@ examples, refer to each command help section, e.g. "ep delete -h".
 
 | Command   | Purpose |
 |-----------|---------|
+| `init`    | Initialize workspace with ep.toml configuration |
+| `build`   | Build database from ep.toml schema (use -c to validate) |
 | `probe`   | Discover and cache filings, roles, concepts |
 | `add`     | Link role and concepts to groups |
 | `new`     | Create groups and patterns |
@@ -435,9 +394,6 @@ examples, refer to each command help section, e.g. "ep delete -h".
 | `stats`   | Analyze concept frequency |
 | `modify`  | Update patterns and manage group membership |
 | `delete`  | Remove data from database |
-| `config`  | Manage configuration settings |
-| `journal` | View or replay workspace journals |
-| `history` | View system-wide command history (ephemeral, from /tmp) |
 
 ## Requirements
 
@@ -504,11 +460,10 @@ Comprehensive documentation for contributors and developers:
   - [Database](docs/developers/modules/db.md) - Storage layer and queries
   - [XBRL](docs/developers/modules/xbrl.md) - SEC API and XBRL parsing
 - **[Design Decisions](docs/developers/decisions/)** - Rationale behind key architectural choices
-- **[Examples](docs/examples/)** - Sample workflows and journal files
+- **[Examples](docs/examples/)** - Sample workflows and ep.toml configurations
 
-Journals are stored in JSONL format for easy parsing and analysis. See
-[docs/examples/journal-aeo.jsonl](docs/examples/journal-aeo.jsonl) for a
-complete workflow example.
+See example ep.toml configurations in the docs/examples/ directory for common
+company analysis patterns.
 
 ## Support
 

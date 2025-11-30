@@ -105,7 +105,7 @@ def run_new_concept(cmd: Cmd, args) -> Result[None, str]:
         # Priority 1: Explicit ticker from command line
         # Priority 2: Default ticker from ft.toml
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
         if not ticker:
             conn.close()
@@ -175,7 +175,7 @@ def run_new_role(cmd: Cmd, args) -> Result[None, str]:
         # Priority 1: Explicit ticker from command line
         # Priority 2: Default ticker from ft.toml
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
         if not ticker:
             conn.close()
@@ -276,7 +276,7 @@ def run_new_group(cmd: Cmd, args) -> Result[None, str]:
         # Priority 1: Explicit ticker from command line
         # Priority 2: Default ticker from ft.toml
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
         if not ticker:
             conn.close()

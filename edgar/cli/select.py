@@ -161,7 +161,7 @@ def select_entities(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     
     # Determine what to query
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     tickers = [ticker] if ticker else None
     result = db.queries.entities.select(conn, tickers)
@@ -193,7 +193,7 @@ def select_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]
 
     # Convert explicit ticker to CIKs if provided
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     explicit_ciks = None
     if ticker:
@@ -314,7 +314,7 @@ def _get_access_nos_for_roles(conn: sqlite3.Connection, cmd: Cmd, args) -> Resul
     
     # Fallback to ticker-based lookup
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     if ticker:
         return _get_access_nos_from_ticker(conn, ticker)
@@ -332,7 +332,7 @@ def _get_group_role_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result
     
     # Try explicit ticker first, then default ticker
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     if ticker:
         result = db.queries.entities.get(conn, ticker=ticker)
@@ -508,7 +508,7 @@ def _get_concept_source_from_ticker_and_group(conn: sqlite3.Connection, args) ->
     # Priority 1: Explicit ticker from command line
     # Priority 2: Default ticker from ft.toml
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     if not ticker:
         return err("cli.select._get_concept_source_from_ticker_and_group: ticker required")
@@ -765,7 +765,7 @@ def select_patterns(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str
     # Priority 1: Explicit ticker from command line
     # Priority 2: Default ticker from ft.toml
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
 
     if args.uid:

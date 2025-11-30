@@ -7,7 +7,6 @@ Quick reference for the most common edgar-pipes commands and patterns.
 Work with all commands:
 
 ```bash
--j, --journal [NAME] # Record command to journal (default or named)
 -d, --debug         # Print pipeline data to stderr
 --json              # Output as JSONL
 --table             # Output as table
@@ -225,57 +224,6 @@ ep report -t TICKER -q -g Operations | \
 
 ---
 
-## Journaling
-
-### Recording (Explicit)
-
-```bash
-# Record to default journal (journals/default.jsonl)
-ep -j probe filings -t AAPL
-ep -j default new group Balance      # Same as -j
-
-# Record to named journals (journals/NAME.jsonl)
-ep -j setup probe filings -t AAPL
-ep -j daily update -t AAPL --force
-ep -j experiment select concepts -t AAPL -p '(?i)cash'
-```
-
-### Replay
-
-```bash
-# Replay default journal
-ep journal replay
-
-# Replay named journal
-ep journal replay setup
-ep journal replay daily
-
-# Replay specific entries
-ep journal replay setup 5 10 15    # Specific indices
-ep journal replay setup 1:50       # Range
-ep journal replay daily 1:10,20:30 # Multiple ranges
-```
-
-### View History and Journals
-
-```bash
-# View system history (automatic, from /tmp, cross-workspace)
-ep history
-ep history --limit 50
-ep history --errors                # Only failed commands
-ep history --success               # Only successful commands
-ep history --pattern 'probe'       # Commands containing "probe"
-
-# View workspace journals
-ep journal                         # View default journal
-ep journal setup                   # View setup journal
-ep journal daily                   # View daily journal
-ep journal setup --limit 10        # Last 10 entries
-ep journal setup --errors          # Failed entries only
-```
-
----
-
 ## Modifying patterns
 
 ### Preview changes (default)
@@ -403,51 +351,43 @@ ep select filings -t TICKER | ep select roles -g GROUP | ep select concepts -p '
 ### Workspaces
 
 ```bash
-# Create workspace directory
+# Initialize new workspace
 mkdir aapl && cd aapl
+ep init
+# Prompts for: user-agent, ticker (AAPL), database path
+# Fetches company data from SEC automatically
+# Creates database and ep.toml - ready to use!
 
-# Create ft.toml configuration
-cat > ft.toml <<EOF
-[workspace]
-ticker = "AAPL"  # Optional default ticker
+# Start exploring
+ep probe filings              # Fetch SEC filings
+ep probe concepts             # Explore XBRL concepts
 
-[edgar-pipes]
-database = "store.db"
-journals = "journals"
-EOF
+# Edit ep.toml to define roles and concepts
+vi ep.toml
 
-# Start working - edgar-pipes finds ft.toml automatically
-ep probe filings -t AAPL
-ep -j setup new group Balance
+# Validate and build
+ep build -c                   # Validate configuration
+ep build                      # Extract financial data
 
 # Workspace auto-discovery works from subdirectories
-cd data/
-ep report -t AAPL -g Balance  # Still finds ../. ft.toml
+cd analysis/
+ep report -g Balance          # Still finds ../ep.toml
 ```
 
-### Advanced: Custom workspace layout
+### Advanced: Copy existing workspace
 
 ```bash
-# Build system paradigm: separate source/build/output
-mkdir company && cd company
+# Copy ep.toml from another workspace
+mkdir new-company && cd new-company
+cp ../aapl/ep.toml .
 
-# Create ft.toml with custom paths
-cat > ft.toml <<EOF
-[workspace]
-ticker = "AAPL"
-name = "Apple Inc."
+# Modify for new company
+vi ep.toml                    # Update ticker, CIK, patterns
 
-[edgar-pipes]
-database = "db/edgar.db"      # Paths relative to ft.toml
-journals = "src/journals"
-EOF
-
-# Create directory structure
-mkdir -p src/journals db build output
-
-# Journal replay builds database from source
-ep journal replay setup       # Reads src/journals/setup.jsonl
-                              # Writes to db/edgar.db
+# Initialize and build
+ep init                       # Shows current workspace status
+ep build -c                   # Validate changes
+ep build                      # Build database
 ```
 
 ### Debugging
@@ -512,20 +452,18 @@ ep report -t TICKER -g Operations --quarterly | \
 ## Configuration
 
 ```bash
-# View current configuration and workspace info
-ep config show
+# View workspace status
+ep init                      # Shows current workspace info if ep.toml exists
 
-# User configuration file location (identity, theme)
-~/.config/edgar-pipes/config.toml
+# Validate configuration
+ep build -c                  # Validate ep.toml without building
 
-# Workspace configuration (ft.toml - auto-discovered)
+# Workspace structure (ep.toml - auto-discovered)
 # edgar-pipes walks up directory tree to find this file
 workspace/
-  ├── ft.toml              # Workspace configuration
-  ├── store.db              # SQLite database (path from ft.toml)
-  └── journals/
-      ├── default.jsonl     # Default journal (ep -j)
-      └── setup.jsonl       # Named journal (ep -j setup)
+  ├── ep.toml               # Single configuration file (user prefs + schema)
+  └── db/
+      └── edgar.db          # SQLite database (path from ep.toml)
 ```
 
 ---

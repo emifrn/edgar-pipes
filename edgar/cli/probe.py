@@ -80,7 +80,7 @@ def probe_filings(conn: sqlite3.Connection, cmd: Cmd, args) -> Result[Cmd, str]:
     # Priority 1: Explicit ticker from command line
     # Priority 2: Default ticker from ft.toml
     ticker = args.ticker if args.ticker else (
-        args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+        args.default_ticker or None
     )
     tickers = cli.shared.merge_stdin_field("ticker", cmd["data"], [ticker] if ticker else None)
     if not tickers:

@@ -72,7 +72,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         # Priority 1: Explicit ticker from command line
         # Priority 2: Default ticker from ft.toml (if no explicit ticker)
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
 
         if ticker:

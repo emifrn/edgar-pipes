@@ -171,7 +171,7 @@ def _remove_concepts_from_group(conn: sqlite3.Connection, args, group_id: int) -
     try:
         # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
 
         # Validate ticker is provided if using uid/names
@@ -253,7 +253,7 @@ def _remove_roles_from_group(conn: sqlite3.Connection, args, group_id: int) -> R
     try:
         # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
         ticker = args.ticker if args.ticker else (
-            args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+            args.default_ticker or None
         )
 
         # Validate ticker is provided if using names
@@ -335,7 +335,7 @@ def run_modify_role(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
             # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
             ticker = args.ticker if args.ticker else (
-                args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+                args.default_ticker or None
             )
 
             if ticker:
@@ -416,7 +416,7 @@ def run_modify_concept(cmd: Cmd, args) -> Result[Cmd | None, str]:
 
             # Get ticker - Priority 1: Explicit, Priority 2: Default from ft.toml
             ticker = args.ticker if args.ticker else (
-                args.default_ticker if hasattr(args, 'default_ticker') and args.default_ticker else None
+                args.default_ticker or None
             )
 
             if ticker:

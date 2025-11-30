@@ -1,5 +1,11 @@
 # ADR 006: ft.toml Workspace Configuration
 
+**Status**: Superseded by [ADR 010: Unified TOML Configuration](010-unified-toml-configuration.md)
+
+**Note**: This ADR documents the ft.toml system introduced in v0.3.0. As of v0.4.0, ft.toml has been replaced by ep.toml which unifies user configuration, workspace paths, and XBRL schema into a single file. The workspace discovery mechanism and context propagation concepts described here still apply to ep.toml.
+
+---
+
 ## Context
 
 In ADR 005, we introduced the workspace concept with `-w/--ws` flag to group database and journals together. While this solved database/journal synchronization issues, it created new friction:

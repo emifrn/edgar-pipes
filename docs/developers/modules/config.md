@@ -1,171 +1,144 @@
 # Configuration module
 
-The configuration system provides two-tier configuration management:
-1. **User configuration** - Identity and preferences (~/.config/edgar-pipes/config.toml)
-2. **Workspace configuration** - Database and journal paths (ft.toml)
+The configuration system provides unified workspace configuration through a single `ep.toml` file at the workspace root.
 
 ## config.py - Configuration management
 
-### Two configuration files
+### Single configuration file
 
-**User config** (~/.config/edgar-pipes/config.toml):
-- User agent (name and email for SEC API)
-- Output theme preference
-- XDG-compliant location
-
-**Workspace config** (ft.toml):
-- Database path (relative to ft.toml)
-- Journals directory (relative to ft.toml)
-- Optional default ticker
+**ep.toml** at workspace root contains:
+- User preferences (user agent, theme)
+- Database path (relative to ep.toml)
+- Company identification (ticker, CIK, name)
+- XBRL schema (roles, concepts, groups, targets)
 - Auto-discovered by walking up directory tree
 
-### User configuration structure
-
-```python
-{
-    "edgar": {
-        "user_agent": "Name email@example.com"
-    },
-    "output": {
-        "theme": "nobox-minimal"
-    }
-}
-```
-
-### Workspace configuration structure
+### Configuration structure
 
 ```toml
-[workspace]
-ticker = "AAPL"  # Optional default ticker
-name = "Apple Inc."
+# User preferences
+user_agent = "John Doe john@example.com"
+theme = "nobox-minimal"
 
-[edgar-pipes]
-database = "store.db"      # Path relative to ft.toml
-journals = "journals"      # Path relative to ft.toml
+# Database and company identification
+database = "db/edgar.db"  # Relative to ep.toml
+ticker = "AAPL"
+cik = "0000320193"
+name = "Apple Inc."
+description = "Financial data extraction from SEC XBRL filings"
+
+# XBRL Roles - Define where to find data in filings
+[roles.balance]
+pattern = "(?i)^CONSOLIDATEDBALANCESHEETS$"
+note = "Balance sheet statement"
+
+# Concepts - Financial metrics to extract
+[concepts.Cash]
+uid = 1
+pattern = "^CashAndCashEquivalentsAtCarryingValue$"
+note = "Cash and cash equivalents"
+
+# Groups - Organize concepts for extraction
+[groups.Balance]
+role = "balance"
+concepts = [1]
+
+# Targets - Common extraction patterns
+[targets.all]
+description = "Extract all financial data"
+groups = ["Balance", "Operations"]
 ```
 
 ### Core functions
 
-**load_user_config()** - Load user configuration
+**find_toml(start_dir: Path | None = None) -> Path | None**
 
-Returns merged configuration dict:
-1. Starts with DEFAULT_CONFIG
-2. Loads and merges config file if it exists (~/.config/edgar-pipes/config.toml)
-3. Applies environment variable overrides (EDGAR_PIPES_USER_AGENT, EDGAR_PIPES_THEME)
-4. Returns final configuration
-
-Environment variable mappings:
-- `EDGAR_PIPES_USER_AGENT` → edgar.user_agent
-- `EDGAR_PIPES_THEME` → output.theme
-
-**find_workspace_config(start_dir: Path | None = None) -> Path | None**
-
-Discovers ft.toml by walking up directory tree:
+Discovers ep.toml by walking up directory tree:
 1. Starts from `start_dir` (defaults to current working directory)
-2. Checks for `ft.toml` in current directory
+2. Checks for `ep.toml` in current directory
 3. Walks up to parent directory
-4. Repeats until `ft.toml` found or filesystem root reached
-5. Returns Path to `ft.toml` or None
+4. Repeats until `ep.toml` found or filesystem root reached
+5. Returns Path to `ep.toml` or None
 
 Similar to how git finds `.git` directory.
 
-**load_workspace_config(context_workspace: str | None = None) -> tuple[Path, dict]**
+**load_toml(context_workspace: str | None = None) -> tuple[Path, dict]**
 
 Loads workspace configuration:
 1. If `context_workspace` provided (from pipeline), use it as workspace root
-2. Otherwise, call `find_workspace_config()` to discover `ft.toml`
-3. Raises error with helpful message if `ft.toml` not found
+2. Otherwise, call `find_toml()` to discover `ep.toml`
+3. Raises RuntimeError with helpful message if `ep.toml` not found
 4. Loads TOML file and validates structure
-5. Returns `(workspace_root, workspace_config)` tuple
+5. Returns `(workspace_root, ep_config)` tuple
 
 Validation checks:
-- `[edgar-pipes]` section exists
 - `database` key exists
-- `journals` key exists
+- `ticker` key exists
+- `cik` key exists
 - Raises clear errors if validation fails
 
-**get_db_path(workspace_root: Path, workspace_config: dict) -> Path**
+**get_db_path(workspace_root: Path, ep_config: dict) -> Path**
 
-Resolves database path from workspace configuration:
-1. Reads `workspace_config["edgar-pipes"]["database"]`
+Resolves database path from configuration:
+1. Reads `ep_config["database"]`
 2. Interprets as relative to `workspace_root`
 3. Returns resolved absolute path
 
 Example:
 ```python
-# ft.toml contains: database = "db/edgar.db"
+# ep.toml contains: database = "db/edgar.db"
 # workspace_root = /home/user/aapl
 # Returns: /home/user/aapl/db/edgar.db
 ```
 
-**get_journal_path(workspace_root: Path, workspace_config: dict, journal_name: str) -> Path**
+**get_ticker(ep_config: dict) -> str**
 
-Resolves journal file path:
-1. Reads `workspace_config["edgar-pipes"]["journals"]`
-2. Interprets as relative to `workspace_root`
-3. Appends `{journal_name}.jsonl`
-4. Returns resolved absolute path
-
-Example:
+Extracts ticker from configuration:
 ```python
-# ft.toml contains: journals = "src/journals"
-# workspace_root = /home/user/aapl
-# journal_name = "setup"
-# Returns: /home/user/aapl/src/journals/setup.jsonl
+return ep_config["ticker"]
 ```
 
-**get_default_ticker(workspace_config: dict) -> str | None**
+**get_cik(ep_config: dict) -> str**
 
-Extracts optional default ticker from workspace configuration:
-1. Checks if `[workspace]` section exists
-2. Returns `ticker` value if present
-3. Returns None if not configured
+Extracts CIK from configuration:
+```python
+return ep_config["cik"]
+```
 
-Default ticker has lowest precedence:
-1. Command-line arguments (highest)
-2. Pipeline context
-3. Workspace default (lowest)
+**get_user_agent(ep_config: dict) -> str**
 
-**init_config_interactive()** - First-run setup
+Extracts user agent from configuration:
+```python
+return ep_config["user_agent"]
+```
 
-Interactive prompt for user-agent configuration:
-1. Checks if config file already exists (returns False if so)
-2. Prompts user for name and email
-3. Creates config directory if needed
-4. Writes config.toml with user-provided user-agent
-5. Returns True on successful creation
+**get_theme(ep_config: dict) -> str**
 
-Called from main.py when default user-agent is detected.
-
-**Helper functions:**
-
-- `get_config_path()`: Returns Path to config.toml using XDG_CONFIG_HOME
-- `get_user_agent(config)`: Extract user agent string
-- `get_theme(config)`: Get configured theme name
+Extracts theme from configuration with default fallback:
+```python
+return ep_config.get("theme", "nobox-minimal")
+```
 
 ### Workspace discovery example
 
 ```bash
 # Directory structure:
 /home/user/projects/aapl/
-  ft.toml
+  ep.toml
   db/
     edgar.db
-  src/
-    journals/
-      default.jsonl
   analysis/
     scripts/
 
 # Run from any subdirectory:
 cd /home/user/projects/aapl/analysis/scripts
-ep report -t AAPL -g Balance
+ep select filings -t AAPL
 
-# find_workspace_config() walks up:
-# 1. Check /home/user/projects/aapl/analysis/scripts/ft.toml (not found)
-# 2. Check /home/user/projects/aapl/analysis/ft.toml (not found)
-# 3. Check /home/user/projects/aapl/ft.toml (found!)
-# Returns: /home/user/projects/aapl/ft.toml
+# find_toml() walks up:
+# 1. Check /home/user/projects/aapl/analysis/scripts/ep.toml (not found)
+# 2. Check /home/user/projects/aapl/analysis/ep.toml (not found)
+# 3. Check /home/user/projects/aapl/ep.toml (found!)
+# Returns: /home/user/projects/aapl/ep.toml
 ```
 
 ### Pipeline context propagation
@@ -178,7 +151,7 @@ cd /home/user/projects/aapl
 ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
 
 # First command (select filings):
-# - Discovers ft.toml in current directory
+# - Discovers ep.toml in current directory
 # - Loads workspace config
 # - Adds workspace_root to output context
 
@@ -192,224 +165,126 @@ ep select filings -t AAPL | ep select roles -g Balance | ep probe concepts
 ```
 
 This ensures the entire pipeline operates on the same workspace even if
-subsequent commands don't explicitly know where the ft.toml is located.
+subsequent commands don't explicitly know where the ep.toml is located.
 
-### First-run experience
+## Workspace initialization
 
-When edgar-pipes runs for the first time:
+**ep init** - Initialize new workspace
 
-1. `main()` calls `load_user_config()`
-2. Config loaded with default user_agent = "edgar-pipes/0.3.0"
-3. `main()` detects default user_agent
-4. Calls `init_config_interactive()`
-5. User provides name and email
-6. Config file created at ~/.config/edgar-pipes/config.toml
-7. `load_user_config()` called again to reload with user's settings
+Interactive workspace setup:
+1. Prompts for user agent (required by SEC)
+2. Prompts for company ticker (e.g., AAPL)
+3. Prompts for database path (optional, defaults to "db/edgar.db")
+4. Fetches company data from SEC API automatically (name, CIK)
+5. Creates database and initializes schema
+6. Inserts company entity into database
+7. Creates ep.toml with template including example roles and concepts
+8. Workspace ready for exploration immediately
 
-If user skips interactive setup (empty input), they'll be prompted again on
-next run. The default user-agent is a signal that configuration is needed.
+If ep.toml already exists, shows current workspace status (use `--force` to recreate).
 
-For workspace configuration, users must create ft.toml manually or copy from
-a template. See examples in README.md and CHEATSHEET.md.
+**ep build** - Build database from ep.toml
 
-## cli/config.py - Config command
+Build database from declarative configuration:
+1. Loads ep.toml configuration
+2. Validates schema (roles, concepts, groups)
+3. Extracts financial data from cached filings
+4. Inserts data into database
 
-Command-line interface for viewing configuration.
+Use `ep build -c` to validate configuration without building.
 
-### Commands
+## Configuration file format
 
-**ep config show** - Display current configuration
-
-Shows two sections:
-
-1. **User Configuration** (~/.config/edgar-pipes/config.toml):
-   - Config file path and existence status
-   - User agent string
-   - Output theme
-
-2. **Workspace Configuration** (ft.toml):
-   - Workspace root directory
-   - Database path and size (if exists)
-   - Journals directory
-   - Default ticker (if configured)
-
-If no workspace found, displays message: "No workspace found (ft.toml not found in current directory tree)"
-
-**ep config env** - Display environment variables
-
-Shows which EDGAR_PIPES environment variables are currently set:
-- EDGAR_PIPES_USER_AGENT
-- EDGAR_PIPES_THEME
-
-Useful for debugging configuration precedence and checking which values
-are being overridden by environment variables.
-
-Output example for `ep config show`:
-
-```
-Edgar-pipes Configuration
-==================================================
-
-User Configuration: ~/.config/edgar-pipes/config.toml ✓
-
-[edgar]
-  user_agent = "John Doe john@example.com"
-
-[output]
-  theme = "nobox-minimal"
-
-Workspace Configuration
-==================================================
-
-Workspace root: /home/user/projects/aapl
-
-[workspace]
-  ticker = "AAPL"
-  name = "Apple Inc."
-
-[edgar-pipes]
-  database = db/edgar.db
-    → /home/user/projects/aapl/db/edgar.db (2.4 MB)
-  journals = src/journals
-    → /home/user/projects/aapl/src/journals (3 journal files)
-```
-
-Output example when no workspace found:
-
-```
-Edgar-pipes Configuration
-==================================================
-
-User Configuration: ~/.config/edgar-pipes/config.toml ✓
-
-[edgar]
-  user_agent = "John Doe john@example.com"
-
-[output]
-  theme = "nobox-minimal"
-
-Workspace Configuration
-==================================================
-
-No workspace found (ft.toml not found in current directory tree)
-
-To create a workspace, create a ft.toml file:
-
-  [workspace]
-  ticker = "AAPL"  # Optional
-
-  [edgar-pipes]
-  database = "store.db"
-  journals = "journals"
-```
-
-### Implementation
-
-**run_show(cmd, args)** - Show configuration handler
-
-1. Loads user configuration
-2. Displays user config section
-3. Attempts to load workspace configuration
-4. If workspace found:
-   - Displays workspace root
-   - Shows workspace config sections
-   - Resolves and displays database path with size
-   - Resolves and displays journals path with file count
-5. If no workspace:
-   - Shows helpful message with example ft.toml
-
-**run_show_env(cmd, args)** - Show environment variables handler
-
-1. Checks which EDGAR_PIPES environment variables are set
-2. Displays each variable with its value or "(not set)"
-3. Useful for debugging configuration precedence issues
-
-**format_size(size_bytes)** - Human-readable file sizes
-
-Converts bytes to appropriate units (B, KB, MB, GB, TB) with one decimal place.
-
-## Configuration file formats
-
-### User config file
-
-The user config file uses TOML format (~/.config/edgar-pipes/config.toml):
+The ep.toml file uses TOML format at workspace root:
 
 ```toml
-# Edgar-pipes user configuration
+# Edgar Pipes Configuration
+# Company: Apple Inc.
 
-[edgar]
-# Your identity for SEC EDGAR API requests
+# User preferences
 user_agent = "John Doe john@example.com"
-
-[output]
-# Default table theme
 theme = "nobox-minimal"
-```
 
-Users can edit this file directly or use environment variables for temporary
-overrides.
-
-### Workspace config file
-
-The workspace config file uses TOML format (ft.toml in workspace root):
-
-```toml
-# Financial Terminal Workspace Configuration
-
-[workspace]
-# Optional default ticker (lowest precedence)
+# Database and company identification
+database = "db/edgar.db"
 ticker = "AAPL"
+cik = "0000320193"
 name = "Apple Inc."
+description = "Financial data extraction from SEC XBRL filings"
 
-[edgar-pipes]
-# Paths relative to this ft.toml file
-database = "store.db"
-journals = "journals"
+# =============================================================================
+# XBRL Roles - Define where to find data in filings
+# =============================================================================
+
+[roles.balance]
+pattern = "(?i)^(CONDENSED)?CONSOLIDATEDBALANCESHEETS(Unaudited)?(Parenthetical)?$"
+note = "Balance sheet statement"
+
+[roles.operations]
+pattern = "(?i)^(CONDENSED)?CONSOLIDATEDSTATEMENTSOFINCOME(Unaudited)?(Parenthetical)?$"
+note = "Income statement"
+
+# =============================================================================
+# Concepts - Financial metrics to extract
+# =============================================================================
+
+[concepts.Cash]
+uid = 1
+pattern = "^CashAndCashEquivalentsAtCarryingValue$"
+note = "Cash and cash equivalents"
+
+[concepts.Revenue]
+uid = 100
+pattern = "^(RevenueFromContractWithCustomerExcludingAssessedTax|SalesRevenueNet)$"
+note = "Total revenue"
+
+# =============================================================================
+# Groups - Organize concepts for extraction and reporting
+# =============================================================================
+
+[groups.Balance]
+role = "balance"
+concepts = [1]
+
+[groups.Operations]
+role = "operations"
+concepts = [100]
+
+# =============================================================================
+# Targets - Common extraction patterns
+# =============================================================================
+
+[targets.all]
+description = "Extract all financial data from filings"
+groups = ["Balance", "Operations"]
 ```
 
-For build-system layouts with separated source/build/output:
+## Migration from v0.3.x
 
-```toml
-[workspace]
-ticker = "AAPL"
-name = "Apple Inc."
+Version 0.4.0 replaced the dual-file configuration system with unified ep.toml:
 
-[edgar-pipes]
-database = "db/edgar.db"      # Build artifact
-journals = "src/journals"     # Source files
-```
+**Removed:**
+- `~/.config/edgar-pipes/config.toml` - user settings moved to ep.toml
+- `ft.toml` - workspace paths moved to ep.toml
+- `setup.json` - schema moved to ep.toml (now TOML with comments)
+- Journal system (complete purge):
+  - `edgar/cli/journal.py` - entire module removed
+  - `ep journal` command - replaced by declarative ep.toml
+  - `ep history` command - use bash `history` instead
+  - `-j/--journal` flag - no longer recording commands
+- `ep config` command - settings now in ep.toml
+- `ep setup` command - replaced by `ep init` + `ep build`
+- `scripts/validate_setup.py` - validation integrated into `ep build -c`
+- `schemas/` directory - JSON Schema not needed for TOML
 
-## XDG Base Directory compliance
-
-User configuration follows XDG Base Directory specification:
-
-- **Config**: `$XDG_CONFIG_HOME/edgar-pipes/` (default: ~/.config/edgar-pipes/)
-
-Workspace configuration uses ft.toml files in project directories, similar
-to how version control systems use .git directories.
-
-This ensures edgar-pipes plays nicely with other Linux/Unix applications and
-respects user preferences for directory organization.
-
-## Migration from v0.2.1
-
-Version 0.3.0 removed:
-- `-w, --ws` workspace flag
-- `EDGAR_PIPES_DB_PATH` environment variable
-- `EDGAR_PIPES_JOURNALS` environment variable
-
-Users must create `ft.toml` files in their workspace directories:
-
+**Migration:**
 ```bash
-# Old (v0.2.1)
-export EDGAR_PIPES_DB_PATH=db/edgar.db
-export EDGAR_PIPES_JOURNALS=src/journals
-ep -w ~/projects/aapl probe filings -t AAPL
-
-# New (v0.3.0)
-cd ~/projects/aapl
-# Create ft.toml with database and journals paths
-ep probe filings -t AAPL  # Auto-discovers ft.toml
+# Manual migration from old workspace
+cd bke/
+cp ft.toml ep.toml  # Start from ft.toml, add schema
+# Edit ep.toml to add user_agent, roles, concepts, groups
+ep build -c         # Validate
+ep build           # Build database
 ```
 
-See CHANGELOG.md for complete migration guide.
+See CHANGELOG.md and ADR 010 for complete migration guide.

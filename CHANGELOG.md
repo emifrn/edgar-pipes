@@ -5,6 +5,168 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-11-29
+
+### ⚠️ Breaking Changes
+
+**Unified TOML Configuration (ep.toml)**
+
+Replaced three-file configuration system with single `ep.toml` file:
+
+**Removed:**
+- `~/.config/edgar-pipes/config.toml` (user configuration)
+- `ft.toml` (workspace paths)
+- `setup.json` (XBRL schema)
+- **Entire journal system:**
+  - `ep journal` command
+  - `ep history` command
+  - `-j/--journal` flag
+  - `edgar/cli/journal.py` module
+- `ep config` command (settings now in ep.toml)
+- `ep setup` command (replaced by `ep init` + `ep build`)
+- `scripts/validate_setup.py` (validation integrated into `ep build -c`)
+- `schemas/` directory (JSON Schema no longer needed)
+
+**Why this change:**
+
+Three separate configuration files (config.toml, ft.toml, setup.json) created confusion and required users to manage multiple formats (TOML, JSON, JSONL journals). The imperative journal system was hard to read and modify. By unifying everything into a single declarative `ep.toml` file, we provide a clearer, more maintainable configuration approach that supports comments and is version-controllable.
+
+### Added
+
+**ep init command** - Interactive workspace initialization
+- Prompts for user-agent (required by SEC)
+- Prompts for company ticker
+- Prompts for database path (defaults to "db/edgar.db")
+- **Automatically fetches company data from SEC API** (name, CIK)
+- Creates database and initializes schema
+- Inserts company entity into database
+- Creates `ep.toml` with template including example roles and concepts
+- Workspace ready for exploration immediately
+- If `ep.toml` exists, shows current workspace status (use `--force` to recreate)
+
+**ep build command** - Build database from ep.toml schema
+- Reads declarative configuration from `ep.toml`
+- Validates XBRL schema (roles, concepts, groups)
+- Extracts financial data from cached filings
+- Inserts data into database
+- Use `ep build -c` to validate configuration without building
+- Use `ep build [target]` to build specific target groups
+
+**Unified ep.toml Configuration:**
+- **User preferences**: user_agent, theme
+- **Database and company**: database path, ticker, CIK, name
+- **XBRL schema**: roles, concepts, groups (with regex patterns, UIDs, notes)
+- **Targets**: named extraction patterns for common workflows
+- Single file, human-readable TOML format with comments
+- Auto-discovered by walking up directory tree
+- Version-controllable and easily shared
+
+### Changed
+
+**Declarative over Imperative:**
+- Define roles, concepts, and groups directly in `ep.toml` using declarative TOML syntax
+- Edit `ep.toml` to modify patterns (replaced imperative journal commands)
+- Run `ep build` to apply changes to database
+
+**Simplified Workflow:**
+
+Before (v0.3.0):
+```bash
+# Required three config files plus journals
+~/.config/edgar-pipes/config.toml  # User identity
+ft.toml                             # Workspace paths
+journals/setup.jsonl                # Imperative commands
+setup.json                          # XBRL schema
+```
+
+After (v0.4.0):
+```bash
+# Single ep.toml file
+ep init                # Initialize workspace interactively
+ep probe filings       # Explore filings
+ep probe concepts      # Explore XBRL concepts
+vi ep.toml            # Define roles and concepts declaratively
+ep build -c           # Validate configuration
+ep build              # Extract financial data
+```
+
+### Migration Guide
+
+**From v0.3.0 to v0.4.0:**
+
+Manual migration for existing workspaces:
+
+```bash
+cd bke/
+
+# Start from ft.toml, create ep.toml
+cp ft.toml ep.toml
+
+# Edit ep.toml to add:
+# - user_agent (from ~/.config/edgar-pipes/config.toml)
+# - company details (ticker, cik, name, description)
+# - roles, concepts, groups (from journals or setup.json)
+
+# Validate new configuration
+ep build -c
+
+# Build database from declarative schema
+ep build
+```
+
+**New workspace (v0.4.0):**
+
+```bash
+mkdir apple && cd apple
+ep init
+# Prompts for: user-agent, ticker (AAPL), database path
+# Fetches company data from SEC automatically
+# Creates database and ep.toml - ready to use!
+
+ep probe filings        # Explore SEC filings
+ep probe concepts       # Discover XBRL concepts
+vi ep.toml             # Define roles and concepts
+ep build -c            # Validate configuration
+ep build               # Extract financial data
+```
+
+**Configuration Structure:**
+
+```toml
+# User preferences
+user_agent = "John Doe john@example.com"
+theme = "nobox-minimal"
+
+# Database and company identification
+database = "db/edgar.db"
+ticker = "AAPL"
+cik = "0000320193"
+name = "Apple Inc."
+
+# XBRL Roles
+[roles.balance]
+pattern = "(?i)^CONSOLIDATEDBALANCESHEETS$"
+note = "Balance sheet statement"
+
+# Concepts
+[concepts.Cash]
+uid = 1
+pattern = "^CashAndCashEquivalentsAtCarryingValue$"
+note = "Cash and cash equivalents"
+
+# Groups
+[groups.Balance]
+role = "balance"
+concepts = [1]
+
+# Targets
+[targets.all]
+description = "Extract all financial data"
+groups = ["Balance", "Operations"]
+```
+
+See [ADR 010: Unified TOML Configuration](docs/developers/decisions/010-unified-toml-configuration.md) for complete rationale and examples.
+
 ## [0.3.0] - 2025-11-22
 
 ### ⚠️ Breaking Changes
