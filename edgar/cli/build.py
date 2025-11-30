@@ -222,7 +222,6 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         print()
 
     # Connect to database
-    cik = config.get_cik(cfg)
     user_agent = config.get_user_agent(cfg)
     conn = sqlite3.connect(db_path)
 
@@ -232,13 +231,24 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         conn.close()
         return err(f"cli.build.run_build: failed to initialize database: {result[1]}")
 
-    # Ensure company entity exists in database
+    # Resolve company entity (fetch from SEC if not in database)
     result = cache.resolve_entities(conn, user_agent, [ticker])
     if is_not_ok(result):
         conn.close()
         return err(f"cli.build.run_build: failed to resolve entity: {result[1]}")
 
-    _, _ = result[1]  # Don't need the data, just ensuring it exists
+    entities, source = result[1]
+    if not entities:
+        conn.close()
+        return err(f"cli.build.run_build: ticker '{ticker}' not found in SEC database")
+
+    entity = entities[0]
+    cik = entity["cik"]
+
+    if source == "sec":
+        print(f"Fetched company: {entity['name']} (CIK: {cik})\n")
+    else:
+        print(f"Found company: {entity['name']} (CIK: {cik})\n")
 
     # Determine cutoff date for filing fetch (default: 10 years ago)
     from datetime import datetime, timedelta

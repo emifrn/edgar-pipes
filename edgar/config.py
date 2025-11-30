@@ -92,7 +92,7 @@ Or create one manually. See https://github.com/emifrn/edgar-pipes for more infor
         raise RuntimeError(f"Error loading {ep_config_path}: {e}")
 
     # Validate required fields
-    required_fields = ["database", "ticker", "cik"]
+    required_fields = ["database", "ticker"]
     missing_fields = [field for field in required_fields if field not in cfg]
 
     if missing_fields:
