@@ -534,6 +534,14 @@ def concepts(conn, cik: str, concepts_config: dict) -> Result[None, str]:
         pattern = concept_spec["pattern"]
         note = concept_spec.get("note", "")
 
+        # Show what we're adding
+        print(f"  Concept pattern:")
+        print(f"    Name: {concept_name}")
+        print(f"    Pattern: {pattern}")
+        if note:
+            print(f"    Note: {note}")
+        print(f"    UID: {uid}")
+
         # Try to insert (idempotent - ignore if exists)
         result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
         if is_not_ok(result):
