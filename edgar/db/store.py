@@ -160,6 +160,16 @@ def init(conn: sqlite3.Connection) -> Result[None,str]:
                 FOREIGN KEY (gid) REFERENCES groups(gid) ON DELETE CASCADE,
                 FOREIGN KEY (pid) REFERENCES concept_patterns(pid) ON DELETE CASCADE
             );
+
+            -- Track which concept patterns have been processed for each filing
+            -- This allows incremental builds to skip already-processed filings
+            CREATE TABLE IF NOT EXISTS filing_patterns_processed (
+                access_no       TEXT NOT NULL,
+                pid             INTEGER NOT NULL,
+                PRIMARY KEY (access_no, pid),
+                FOREIGN KEY (access_no) REFERENCES filings(access_no) ON DELETE CASCADE,
+                FOREIGN KEY (pid) REFERENCES concept_patterns(pid) ON DELETE CASCADE
+            );
         """)
         cursor.close()
         conn.commit()

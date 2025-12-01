@@ -213,15 +213,19 @@ Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawD
     # - build: builds database from ep.toml (requires workspace but not pipeline)
     workspace_commands = ['edgar.cli.init', 'edgar.cli.build']
 
-    if args.func.__module__ in workspace_commands:
-        cmd = {"name": "", "data": []}
-        result = args.func(cmd, args)
-        if is_not_ok(result):
-            print(result[1], file=sys.stderr)
-            sys.exit(1)
-    else:
-        # Pipeline commands - support stdin/stdout data flow
-        cli_main(args)
+    try:
+        if args.func.__module__ in workspace_commands:
+            cmd = {"name": "", "data": []}
+            result = args.func(cmd, args)
+            if is_not_ok(result):
+                print(result[1], file=sys.stderr)
+                sys.exit(1)
+        else:
+            # Pipeline commands - support stdin/stdout data flow
+            cli_main(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted", file=sys.stderr)
+        sys.exit(130)
 
 
 if __name__ == "__main__":

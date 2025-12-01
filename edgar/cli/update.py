@@ -59,8 +59,8 @@ def run(cmd: Cmd, args) -> Result[None, str]:
             cik = company["cik"]
             ticker = company["ticker"].upper()
 
-            # Get filings without facts (group-aware if group_filter is set)
-            result = db.queries.filings.select_by_entity(conn, ciks=[cik], stubs_only=True, group_filter=group_filter)
+            # Get filings needing processing (filtered by group if group_filter is set)
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik], group_filter=group_filter)
             if is_not_ok(result):
                 print(f"  Error querying filings: {result[1]}", file=sys.stderr)
                 continue

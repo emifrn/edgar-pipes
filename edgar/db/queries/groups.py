@@ -10,6 +10,7 @@ Functions:
     select(conn) -> Result[list[dict], str]
     update_name(conn, gid, new_name) -> Result[None, str]
     link_concept_pattern(conn, gid, pid) -> Result[None, str]
+    count_patterns(conn, gid) -> Result[int, str]
 """
 import sqlite3
 from typing import Any, Optional
@@ -145,5 +146,25 @@ def link_concept_pattern(conn: sqlite3.Connection, gid: int, pid: int) -> Result
     result = db.store.insert_or_ignore(conn, "group_concept_patterns", link_data)
     if is_ok(result):
         return ok(None)
+    else:
+        return result
+
+
+def count_patterns(conn: sqlite3.Connection, gid: int) -> Result[int, str]:
+    """
+    Count concept patterns linked to a group.
+
+    Args:
+        conn: Database connection
+        gid: Group ID
+
+    Returns:
+        Result containing pattern count or error message
+    """
+    query = "SELECT COUNT(*) FROM group_concept_patterns WHERE gid = ?"
+    result = db.store.select(conn, query, (gid,))
+    if is_ok(result):
+        count = result[1][0]["COUNT(*)"]
+        return ok(count)
     else:
         return result

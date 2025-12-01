@@ -31,7 +31,7 @@ def add_arguments(subparsers):
     parser_filings.add_argument("-d", "--date", nargs="+", metavar="X", help="filter by filing date constraints ('>2024-01-01', '<=2024-12-31')")
     parser_filings.add_argument("-f", "--form", nargs="+", metavar="X", help="SEC form types (10-K, 10-Q, etc.)")
     parser_filings.add_argument("-l", "--limit", metavar="X", type=int, help="maximum results to return")
-    parser_filings.add_argument("-s", "--stubs", action="store_true", help="only filings missing fact data")
+    parser_filings.add_argument("-s", "--stubs", action="store_true", help="only filings never processed (no patterns probed)")
     parser_filings.set_defaults(func=run)
     
     # Roles subcommand

@@ -30,6 +30,7 @@ from . import role_patterns
 from . import concept_patterns
 from . import groups
 from . import facts
+from . import filing_patterns_processed
 
 __all__ = [
     'entities',
@@ -40,4 +41,5 @@ __all__ = [
     'concept_patterns',
     'groups',
     'facts',
+    'filing_patterns_processed',
 ]

@@ -349,3 +349,28 @@ def select_group(
             })
 
     return ok(facts)
+
+
+def count(conn: sqlite3.Connection, cik: str) -> Result[int, str]:
+    """
+    Count total facts for an entity.
+
+    Args:
+        conn: Database connection
+        cik: Company CIK
+
+    Returns:
+        Result containing fact count or error message
+    """
+    query = """
+        SELECT COUNT(*)
+        FROM facts f
+        JOIN concepts c ON f.cid = c.cid
+        WHERE c.cik = ?
+    """
+    result = db.store.select(conn, query, (cik,))
+    if is_ok(result):
+        count = result[1][0]["COUNT(*)"]
+        return ok(count)
+    else:
+        return result

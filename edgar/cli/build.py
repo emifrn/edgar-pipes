@@ -5,6 +5,7 @@ Build database from ep.toml configuration. Validates schema and extracts facts.
 """
 import sys
 import sqlite3
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
 # Local modules
 from edgar import config
@@ -23,6 +24,8 @@ def add_arguments(subparsers):
     parser_build = subparsers.add_parser("build", help="build database from ep.toml configuration")
     parser_build.add_argument("groups", nargs="*", help="groups to build (default: all groups)")
     parser_build.add_argument("-c", "--check", action="store_true", help="validate ep.toml and report status (no build)")
+    parser_build.add_argument("-s", "--status", action="store_true", help="show build status (groups, filings, facts)")
+    parser_build.add_argument("-v", "--verbose", action="store_true", help="show detailed output (role/concept patterns, full stats)")
     parser_build.set_defaults(func=run)
 
 
@@ -66,9 +69,14 @@ def run(cmd: Cmd, args) -> Result[None, str]:
     if args.check:
         return run_check(root, cfg)
 
+    # If --status flag, show build status
+    if args.status:
+        return run_status(root, cfg)
+
     # Otherwise, build database
     groups = args.groups if args.groups else []
-    return run_build(root, cfg, groups)
+    verbose = args.verbose
+    return run_build(root, cfg, groups, verbose)
 
 
 def resolve_group_dependencies(groups_config: dict, requested_groups: list[str]) -> set[str]:
@@ -159,7 +167,101 @@ def run_check(root, cfg: dict) -> Result[None, str]:
     return ok(None)
 
 
-def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
+def run_status(root, cfg: dict) -> Result[None, str]:
+    """Show build status: groups, filings, and facts."""
+    ticker = config.get_ticker(cfg)
+    db_path = config.get_db_path(root, cfg)
+
+    print(f"Database: {db_path}")
+
+    # Connect to database
+    conn = sqlite3.connect(db_path)
+
+    # Check if database is initialized
+    result = db.store.select(conn, "SELECT name FROM sqlite_master WHERE type='table' AND name='groups'", ())
+    if is_not_ok(result) or not result[1]:
+        conn.close()
+        print("Database not initialized. Run 'ep build' first.")
+        return ok(None)
+
+    # Get entity info (CIK) from database
+    result = db.queries.entities.select(conn, tickers=[ticker])
+    if is_not_ok(result) or not result[1]:
+        conn.close()
+        print(f"Entity '{ticker}' not found in database. Run 'ep build' first.")
+        return ok(None)
+
+    entity = result[1][0]
+    cik = entity["cik"]
+
+    print(f"Ticker: {ticker} (CIK: {cik})\n")
+
+    # Get all groups
+    result = db.queries.groups.select(conn)
+    if is_not_ok(result):
+        conn.close()
+        return err(f"Failed to query groups: {result[1]}")
+
+    groups = result[1]
+    if not groups:
+        conn.close()
+        print("No groups defined. Run 'ep build' first.")
+        return ok(None)
+
+    # Get total filings
+    result = db.queries.filings.select_by_entity(conn, ciks=[cik])
+    if is_not_ok(result):
+        conn.close()
+        return err(f"Failed to query filings: {result[1]}")
+
+    all_filings = result[1]
+    total_filings = len(all_filings)
+
+    print("Groups:")
+
+    for group in groups:
+        gid = group["gid"]
+        group_name = group["group_name"]
+
+        # Get pattern count for this group
+        result = db.queries.groups.count_patterns(conn, gid)
+        if is_ok(result):
+            pattern_count = result[1]
+        else:
+            pattern_count = 0
+
+        # Get processed filings count for this group
+        result = db.queries.concept_patterns.select_by_group(conn, gid, cik)
+        if is_ok(result):
+            concept_patterns = result[1]
+            pattern_ids = [p["pid"] for p in concept_patterns]
+
+            processed_count = 0
+            for filing in all_filings:
+                result = db.queries.filing_patterns_processed.is_fully_processed(
+                    conn, filing["access_no"], pattern_ids)
+                if is_ok(result) and result[1]:
+                    processed_count += 1
+        else:
+            processed_count = 0
+
+        # Format output
+        print(f"  {group_name:30s} {pattern_count:3d} patterns  {processed_count:3d}/{total_filings:<3d} filings")
+
+    # Get total facts count
+    result = db.queries.facts.count(conn, cik)
+    if is_ok(result):
+        total_facts = result[1]
+    else:
+        total_facts = 0
+
+    print(f"\nTotal: {len(groups)} groups, {total_filings} filings, {total_facts:,} facts")
+
+    conn.close()
+    return ok(None)
+
+
+def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Result[None, str]:
     """Build database from ep.toml configuration."""
     ticker = config.get_ticker(cfg)
     db_path = config.get_db_path(root, cfg)
@@ -257,10 +359,10 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         ten_years_ago = datetime.now() - timedelta(days=365*10)
         cutoff = ten_years_ago.strftime("%Y-%m-%d")
 
-    # Fetch all filings once (cache filing metadata)
+    # Fetch all filings once (always check SEC for latest filings)
     print(f"Fetching filings from SEC (after {cutoff})...", end=" ", flush=True)
     date_filters = [("filing_date", ">", cutoff)]
-    result = cache.resolve_filings(conn, user_agent, cik, form_types={'10-Q', '10-K'}, date_filters=date_filters)
+    result = cache.resolve_filings(conn, user_agent, cik, form_types={'10-Q', '10-K'}, date_filters=date_filters, force=True)
     if is_not_ok(result):
         conn.close()
         return err(f"cli.build.run_build: failed to fetch filings: {result[1]}")
@@ -278,30 +380,61 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
         return ok(None)
 
     # Step 4.5: Probe all roles for all filings upfront (cache role names)
-    print(f"Probing roles for {len(all_filings)} filing(s)...")
     total_roles = 0
     fetched_count = 0
     cached_count = 0
 
-    for i, filing in enumerate(all_filings, 1):
-        access_no = filing["access_no"]
-        filing_date = filing.get("filing_date", "?")
-        print(f"  [{i:2d}/{len(all_filings)}] {access_no} {filing_date}...", end=" ", flush=True)
+    if verbose:
+        # Verbose mode - show each filing
+        print(f"Probing roles for {len(all_filings)} filing(s)...")
+        for i, filing in enumerate(all_filings, 1):
+            access_no = filing["access_no"]
+            filing_date = filing.get("filing_date", "?")
+            print(f"  [{i:2d}/{len(all_filings)}] {access_no} {filing_date}...", end=" ", flush=True)
 
-        result = cache.resolve_roles(conn, user_agent, cik, access_no)
-        if is_not_ok(result):
-            print(f"failed: {result[1]}")
-            continue
+            result = cache.resolve_roles(conn, user_agent, cik, access_no)
+            if is_not_ok(result):
+                print(f"failed: {result[1]}")
+                continue
 
-        roles, source = result[1]
-        total_roles += len(roles)
+            roles, source = result[1]
+            total_roles += len(roles)
 
-        if source == "sec":
-            print(f"cached {len(roles)} roles")
-            fetched_count += 1
-        else:
-            print(f"found {len(roles)} roles")
-            cached_count += 1
+            if source == "sec":
+                print(f"cached {len(roles)} roles")
+                fetched_count += 1
+            else:
+                print(f"found {len(roles)} roles")
+                cached_count += 1
+    else:
+        # Non-verbose mode - use progress bar
+        with Progress(
+            TextColumn("  Probing roles:"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total})"),
+            TextColumn("[cyan]{task.fields[current]}"),
+        ) as progress:
+            task = progress.add_task("Probing", total=len(all_filings), current="")
+
+            for filing in all_filings:
+                access_no = filing["access_no"]
+                filing_date = filing.get("filing_date", "?")
+
+                result = cache.resolve_roles(conn, user_agent, cik, access_no)
+                if is_not_ok(result):
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
+                    continue
+
+                roles, source = result[1]
+                total_roles += len(roles)
+
+                if source == "sec":
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: cached {len(roles)} roles")
+                    fetched_count += 1
+                else:
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: found {len(roles)} roles")
+                    cached_count += 1
 
     if fetched_count > 0 and cached_count > 0:
         print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles ({fetched_count} from SEC, {cached_count} from DB)\n")
@@ -312,7 +445,7 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
 
     # Process groups one at a time
     for i, group_name in enumerate(groups_to_process, 1):
-        result = build_group(conn, cik, ticker, user_agent, cfg, group_name, all_filings, i, len(groups_to_process))
+        result = build_group(conn, cik, ticker, user_agent, cfg, group_name, all_filings, i, len(groups_to_process), verbose)
         if is_not_ok(result):
             print(f"ERROR: Failed to build group '{group_name}': {result[1]}")
             # Continue with other groups instead of failing completely
@@ -326,7 +459,7 @@ def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
 
 
 def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_name: str, all_filings: list,
-                group_index: int = 1, total_groups: int = 1) -> Result[None, str]:
+                group_index: int = 1, total_groups: int = 1, verbose: bool = False) -> Result[None, str]:
     """
     Build a single group: populate schema and extract facts.
 
@@ -340,6 +473,7 @@ def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_n
         all_filings: List of all available filings
         group_index: Current group number (1-based)
         total_groups: Total number of groups being processed
+        verbose: Show detailed output if True
 
     Returns:
         ok(None) on success, err(str) on failure
@@ -368,7 +502,7 @@ def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_n
     # Insert role pattern if not already present
     if role_name:
         roles_to_insert = {role_name: cfg.get("roles", {}).get(role_name, {})}
-        result = roles(conn, cik, roles_to_insert)
+        result = roles(conn, cik, roles_to_insert, verbose)
         if is_not_ok(result):
             return err(f"build_group: failed to insert role '{role_name}': {result[1]}")
 
@@ -381,7 +515,7 @@ def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_n
         if concept_def.get("uid") in concept_uids:
             concepts_to_insert[concept_name] = concept_def
 
-    result = concepts(conn, cik, concepts_to_insert)
+    result = concepts(conn, cik, concepts_to_insert, verbose)
     if is_not_ok(result):
         return err(f"build_group: failed to insert concepts: {result[1]}")
 
@@ -396,158 +530,255 @@ def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_n
         print(f"[{group_index:2d}/{total_groups}] {group_name} derived from {parent_name}")
         return ok(None)
 
-    # Step 2: Determine which filings need facts for this group (main groups only)
-    # Use stubs_only to find filings missing facts for this group
-    result = db.queries.filings.select_by_entity(
-        conn,
-        ciks=[cik],
-        stubs_only=True,
-        group_filter={group_name}
-    )
-    if is_not_ok(result):
-        return err(f"build_group: failed to query filings: {result[1]}")
+    # Step 2: Get pattern IDs for this group to check processed status
+    concept_uids = group_spec.get("concepts", [])
+    pattern_ids = []
+    for uid in concept_uids:
+        result_pattern = db.queries.concept_patterns.get_by_uid(conn, cik, uid)
+        if is_ok(result_pattern) and result_pattern[1]:
+            pattern_ids.append(result_pattern[1]["pid"])
 
-    filings_needing_facts = result[1]
+    # Check if all filings are already processed
+    all_processed = True
+    for filing in all_filings:
+        result = db.queries.filing_patterns_processed.is_fully_processed(conn, filing["access_no"], pattern_ids)
+        if is_ok(result) and not result[1]:
+            all_processed = False
+            break
 
-    # If the query returned 0 filings but we haven't probed roles yet,
-    # process all filings (fresh database case)
-    if not filings_needing_facts:
-        # Check if roles have been probed for this entity
-        result = db.queries.roles.select_by_entity(conn, cik)
-        if is_not_ok(result):
-            return err(f"build_group: failed to check roles: {result[1]}")
-
-        probed_roles = result[1]
-
-        if not probed_roles:
-            # Fresh database - need to process all filings
-            filings_needing_facts = all_filings
-        else:
-            # Roles exist but no filings need facts for this group
-            print(f"  ✓ All filings have facts for this group (0 to process)\n")
-            return ok(None)
-
-    print(f"  Processing {len(filings_needing_facts)} filing(s)...\n")
+    if all_processed and pattern_ids:
+        print(f"  ✓ All {len(all_filings)} filings already processed\n")
+        return ok(None)
 
     # Step 3: Extract facts from filings for this group
     stats_total = {"candidates": 0, "chosen": 0, "inserted": 0}
-    processed_count = 0
 
-    for filing in filings_needing_facts:
-        access_no = filing["access_no"]
-        filing_date = filing.get("filing_date", "?")
-        processed_count += 1
+    if verbose:
+        # Verbose mode - show detailed output for each filing
+        print(f"  Processing {len(all_filings)} filing(s)...\n")
 
-        # Match roles against this specific group (roles already probed upfront)
-        result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
-        if is_not_ok(result):
-            print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date}: ERROR matching roles")
-            continue
+        for idx, filing in enumerate(all_filings, 1):
+            access_no = filing["access_no"]
+            filing_date = filing.get("filing_date", "?")
 
-        role_map = result[1]
-        if not role_map or group_name not in role_map:
-            print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date}: SKIP (no matching roles)")
-            continue
+            # Check if this filing is already processed
+            result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
+            if is_ok(result) and result[1]:
+                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: already processed")
+                continue
 
-        # Filter to only this group
-        role_map_filtered = {group_name: role_map[group_name]}
-
-        # Probe concepts for matched roles
-        for role_tail in role_map_filtered[group_name]:
-            result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
+            # Match roles against this specific group (roles already probed upfront)
+            result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
             if is_not_ok(result):
-                print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date}: WARN probing concepts for {role_tail}")
-            # Don't need to extract the data here, just ensuring concepts are cached
+                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: ERROR matching roles")
+                continue
 
-        # Extract facts for this group
-        result = _update_filing(conn, cik, access_no, role_map_filtered)
+            role_map = result[1]
+            if not role_map or group_name not in role_map:
+                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: SKIP (no matching roles)")
+                continue
 
-        if is_ok(result):
-            stats = result[1]
-            stats_total["candidates"] += stats["candidates"]
-            stats_total["chosen"] += stats["chosen"]
-            stats_total["inserted"] += stats["inserted"]
-            print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date} {stats['fiscal_period']}: "
-                  f"cand={stats['candidates']} chosen={stats['chosen']} inserted={stats['inserted']}")
-        else:
-            print(f"  [{processed_count}/{len(filings_needing_facts)}] {access_no} {filing_date}: ERROR extracting facts: {result[1]}")
+            # Filter to only this group
+            role_map_filtered = {group_name: role_map[group_name]}
 
-    print(f"  ✓ Processed {len(filings_needing_facts)} filing(s): "
-          f"{stats_total['candidates']} candidates, "
-          f"{stats_total['chosen']} chosen, "
-          f"{stats_total['inserted']} inserted\n")
+            # Probe concepts for matched roles
+            for role_tail in role_map_filtered[group_name]:
+                result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
+                if is_not_ok(result):
+                    print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: WARN probing concepts for {role_tail}")
+                # Don't need to extract the data here, just ensuring concepts are cached
+
+            # Extract facts for this group
+            result = _update_filing(conn, cik, access_no, role_map_filtered)
+
+            if is_ok(result):
+                stats = result[1]
+                stats_total["candidates"] += stats["candidates"]
+                stats_total["chosen"] += stats["chosen"]
+                stats_total["inserted"] += stats["inserted"]
+                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date} {stats['fiscal_period']}: "
+                      f"cand={stats['candidates']} chosen={stats['chosen']} inserted={stats['inserted']}")
+            else:
+                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: ERROR extracting facts: {result[1]}")
+
+            # Mark all concept patterns for this group as processed (regardless of success/failure)
+            # This enables incremental builds to skip this filing next time
+            for pid in pattern_ids:
+                db.queries.filing_patterns_processed.insert(conn, access_no, pid)
+
+        print(f"  ✓ Processed {len(all_filings)} filing(s): "
+              f"{stats_total['candidates']} candidates, "
+              f"{stats_total['chosen']} chosen, "
+              f"{stats_total['inserted']} inserted\n")
+    else:
+        # Non-verbose mode - use progress bar
+        with Progress(
+            TextColumn("  Processing:"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total})"),
+            TextColumn("[cyan]{task.fields[current]}"),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task("Processing", total=len(all_filings), current="")
+
+            for filing in all_filings:
+                access_no = filing["access_no"]
+                filing_date = filing.get("filing_date", "?")
+
+                # Check if this filing is already processed
+                result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
+                if is_ok(result) and result[1]:
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: already processed")
+                    continue
+
+                # Match roles against this specific group (roles already probed upfront)
+                result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
+                if is_not_ok(result):
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
+                    continue
+
+                role_map = result[1]
+                if not role_map or group_name not in role_map:
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: SKIP")
+                    continue
+
+                # Filter to only this group
+                role_map_filtered = {group_name: role_map[group_name]}
+
+                # Probe concepts for matched roles
+                for role_tail in role_map_filtered[group_name]:
+                    result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
+                    # Don't need to extract the data here, just ensuring concepts are cached
+
+                # Extract facts for this group
+                result = _update_filing(conn, cik, access_no, role_map_filtered)
+
+                if is_ok(result):
+                    stats = result[1]
+                    stats_total["candidates"] += stats["candidates"]
+                    stats_total["chosen"] += stats["chosen"]
+                    stats_total["inserted"] += stats["inserted"]
+                    progress.update(task, advance=1,
+                                  current=f"{access_no} {filing_date} {stats['fiscal_period']}: {stats['inserted']} facts")
+                else:
+                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
+
+                # Mark all concept patterns for this group as processed (regardless of success/failure)
+                # This enables incremental builds to skip this filing next time
+                for pid in pattern_ids:
+                    db.queries.filing_patterns_processed.insert(conn, access_no, pid)
+
+        print(f"  ✓ Processed {len(all_filings)} filing(s), inserted {stats_total['inserted']} facts\n")
 
     return ok(None)
 
 
-def roles(conn, cik: str, roles_config: dict) -> Result[None, str]:
+def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[None, str]:
     """
     Populate role patterns from ep.toml (idempotent).
 
-    Called as: build.roles(conn, cik, roles_config)
+    Called as: build.roles(conn, cik, roles_config, verbose)
 
     Args:
         conn: Database connection
         cik: Company CIK
         roles_config: Roles section from ep.toml
+        verbose: Show detailed output if True
 
     Returns:
         ok(None) on success, err(str) on failure
     """
-    for role_name, role_spec in roles_config.items():
-        pattern = role_spec["pattern"]
-        note = role_spec.get("note", "")
+    if verbose:
+        # Detailed output - show each role pattern
+        for role_name, role_spec in roles_config.items():
+            pattern = role_spec["pattern"]
+            note = role_spec.get("note", "")
 
-        # Show what we're adding
-        print(f"  Role pattern:")
-        print(f"    Name: {role_name}")
-        print(f"    Pattern: {pattern}")
-        if note:
-            print(f"    Note: {note}")
+            print(f"  Role pattern:")
+            print(f"    Name: {role_name}")
+            print(f"    Pattern: {pattern}")
+            if note:
+                print(f"    Note: {note}")
 
-        # Try to insert (idempotent - ignore if exists)
-        result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
-        if is_not_ok(result):
-            # If already exists, that's fine
-            if "already exists" not in result[1]:
-                return err(f"build.roles: failed to insert '{role_name}': {result[1]}")
+            # Try to insert (idempotent - ignore if exists)
+            result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
+            if is_not_ok(result):
+                # If already exists, that's fine
+                if "already exists" not in result[1]:
+                    return err(f"build.roles: failed to insert '{role_name}': {result[1]}")
+    else:
+        # Summary output - just show count
+        for role_name, role_spec in roles_config.items():
+            pattern = role_spec["pattern"]
+            note = role_spec.get("note", "")
+
+            # Try to insert (idempotent - ignore if exists)
+            result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
+            if is_not_ok(result):
+                # If already exists, that's fine
+                if "already exists" not in result[1]:
+                    return err(f"build.roles: failed to insert '{role_name}': {result[1]}")
+
+        # Print summary
+        if roles_config:
+            print(f"  Matched {len(roles_config)} role pattern(s)")
 
     return ok(None)
 
 
-def concepts(conn, cik: str, concepts_config: dict) -> Result[None, str]:
+def concepts(conn, cik: str, concepts_config: dict, verbose: bool = False) -> Result[None, str]:
     """
     Populate concept patterns from ep.toml (idempotent).
 
-    Called as: build.concepts(conn, cik, concepts_config)
+    Called as: build.concepts(conn, cik, concepts_config, verbose)
 
     Args:
         conn: Database connection
         cik: Company CIK
         concepts_config: Concepts section from ep.toml
+        verbose: Show detailed output if True
 
     Returns:
         ok(None) on success, err(str) on failure
     """
-    for concept_name, concept_spec in concepts_config.items():
-        uid = concept_spec["uid"]
-        pattern = concept_spec["pattern"]
-        note = concept_spec.get("note", "")
+    if verbose:
+        # Detailed output - show each concept pattern
+        for concept_name, concept_spec in concepts_config.items():
+            uid = concept_spec["uid"]
+            pattern = concept_spec["pattern"]
+            note = concept_spec.get("note", "")
 
-        # Show what we're adding
-        print(f"  Concept pattern:")
-        print(f"    Name: {concept_name}")
-        print(f"    Pattern: {pattern}")
-        if note:
-            print(f"    Note: {note}")
-        print(f"    UID: {uid}")
+            print(f"  Concept pattern:")
+            print(f"    Name: {concept_name}")
+            print(f"    Pattern: {pattern}")
+            if note:
+                print(f"    Note: {note}")
+            print(f"    UID: {uid}")
 
-        # Try to insert (idempotent - ignore if exists)
-        result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
-        if is_not_ok(result):
-            # If already exists, that's fine
-            if "already exists" not in result[1]:
-                return err(f"build.concepts: failed to insert '{concept_name}': {result[1]}")
+            # Try to insert (idempotent - ignore if exists)
+            result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
+            if is_not_ok(result):
+                # If already exists, that's fine
+                if "already exists" not in result[1]:
+                    return err(f"build.concepts: failed to insert '{concept_name}': {result[1]}")
+    else:
+        # Summary output - just show count
+        for concept_name, concept_spec in concepts_config.items():
+            uid = concept_spec["uid"]
+            pattern = concept_spec["pattern"]
+            note = concept_spec.get("note", "")
+
+            # Try to insert (idempotent - ignore if exists)
+            result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
+            if is_not_ok(result):
+                # If already exists, that's fine
+                if "already exists" not in result[1]:
+                    return err(f"build.concepts: failed to insert '{concept_name}': {result[1]}")
+
+        # Print summary
+        if concepts_config:
+            print(f"  Matched {len(concepts_config)} concept pattern(s)")
 
     return ok(None)
 

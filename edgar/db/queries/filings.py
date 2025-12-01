@@ -95,9 +95,10 @@ def select_by_entity(conn: sqlite3.Connection,
         form_types: List of form types to filter by (e.g., ['10-K', '10-Q'])
         date_filters: List of (field, operator, value) tuples for date filtering
                      e.g., [('filing_date', '>', '2024-01-01')]
-        stubs_only: If True, only return filings without extracted facts
-        group_filter: If provided with stubs_only=True, only return filings missing facts
-                     for this specific set of groups (checks role+concept combinations)
+        stubs_only: If True, only return filings with no processed patterns (never processed)
+        group_filter: If provided, only return filings that need processing for
+                     this specific set of groups (checks processed patterns)
+                     Note: group_filter takes precedence over stubs_only
     """
     base_query = """
         SELECT  f.access_no,
@@ -153,14 +154,12 @@ def select_by_entity(conn: sqlite3.Connection,
             where_clauses.append(f"f.{field} {operator} ?")
             params.append(value)
 
-    # Add stubs filter if requested
+    # Add stubs filter if requested (only when no group_filter specified)
     if stubs_only and not group_filter:
-        # Original behavior: return filings with no facts at all
-        # Only use this when no group filter is specified
+        # Return filings with no processed patterns (never been processed)
         where_clauses.append("""NOT EXISTS (
-            SELECT 1 FROM facts
-            JOIN roles ON facts.rid = roles.rid
-            WHERE roles.access_no = f.access_no
+            SELECT 1 FROM filing_patterns_processed
+            WHERE access_no = f.access_no
         )""")
 
     # Construct final query
@@ -178,9 +177,8 @@ def select_by_entity(conn: sqlite3.Connection,
 
     filings = result[1]
 
-    # If group_filter is specified with stubs_only, do post-processing to filter filings
-    # that are missing facts for the specified groups
-    if stubs_only and group_filter:
+    # If group_filter is specified, filter to filings needing processing for those groups
+    if group_filter:
         filings = _filter_filings_missing_group_facts(conn, filings, group_filter)
 
     return ok(filings)
@@ -188,15 +186,10 @@ def select_by_entity(conn: sqlite3.Connection,
 
 def _filter_filings_missing_group_facts(conn: sqlite3.Connection, filings: list[dict[str, Any]], group_filter: set[str]) -> list[dict[str, Any]]:
     """
-    Filter filings to only those missing facts for specified groups.
+    Filter filings to only those missing processed concept patterns for specified groups.
 
-    For each filing, check if it's missing facts for ANY of the groups in group_filter.
-    A filing is "missing facts" for a group if:
-    1. The filing has roles matching the group's role patterns, AND
-    2. The group has concept patterns defined, AND
-    3. Facts don't exist for ALL role+concept combinations
-
-    This uses application-level regex matching which is more portable than SQL REGEXP.
+    A filing needs processing if ANY concept pattern for a group hasn't been probed yet.
+    This is determined by checking the filing_patterns_processed table.
     """
     if not filings or not group_filter:
         return filings
@@ -207,8 +200,8 @@ def _filter_filings_missing_group_facts(conn: sqlite3.Connection, filings: list[
         access_no = filing["access_no"]
         cik = filing["cik"]
 
-        # Check if this filing is missing facts for ANY of the specified groups
-        missing_for_any_group = False
+        # Check if this filing is missing processed patterns for ANY of the specified groups
+        needs_processing = False
 
         for group_name in group_filter:
             # Get the group ID
@@ -217,15 +210,6 @@ def _filter_filings_missing_group_facts(conn: sqlite3.Connection, filings: list[
                 continue  # Group doesn't exist, skip
 
             gid = result[1]
-
-            # Get role patterns for this group
-            result = db.queries.role_patterns.select_by_group(conn, gid, cik)
-            if is_not_ok(result):
-                continue
-
-            role_patterns = result[1]
-            if not role_patterns:
-                continue  # No role patterns for this group
 
             # Get concept patterns for this group
             result = db.queries.concept_patterns.select_by_group(conn, gid, cik)
@@ -236,82 +220,25 @@ def _filter_filings_missing_group_facts(conn: sqlite3.Connection, filings: list[
             if not concept_patterns:
                 continue  # No concept patterns for this group
 
-            # Get roles for this filing
-            result = db.queries.roles.select_by_filing(conn, access_no)
+            # Check if all concept patterns have been processed for this filing
+            pattern_ids = [p["pid"] for p in concept_patterns]
+
+            if not pattern_ids:
+                continue
+
+            # Check if all patterns have been processed
+            result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
             if is_not_ok(result):
                 continue
 
-            filing_roles = result[1]
-            if not filing_roles:
-                continue  # No roles in this filing
+            fully_processed = result[1]
 
-            # Match filing roles against role patterns
-            matched_roles = []
-            for role_pattern in role_patterns:
-                try:
-                    regex = re.compile(role_pattern["pattern"])
-                    for role_name in filing_roles:
-                        if regex.search(role_name):
-                            matched_roles.append(role_name)
-                except re.error:
-                    continue  # Skip invalid pattern
-
-            if not matched_roles:
-                continue  # This filing has no roles matching this group's patterns
-
-            # Now check if facts exist for all matched_role x concept_pattern combinations
-            # Get concepts that match the concept patterns
-            result = db.queries.concepts.select_by_entity(conn, cik)
-            if is_not_ok(result):
-                continue
-
-            all_concepts = result[1]
-
-            # Match concepts against concept patterns
-            matched_concepts = []
-            for concept_pattern in concept_patterns:
-                try:
-                    regex = re.compile(concept_pattern["pattern"])
-                    for concept in all_concepts:
-                        if regex.search(concept["tag"]):
-                            matched_concepts.append(concept)
-                except re.error:
-                    continue
-
-            if not matched_concepts:
-                # No matching concepts found - this is suspicious but not necessarily an error
-                # Consider it as "missing facts" since we can't extract anything
-                missing_for_any_group = True
+            # If not fully processed, this filing needs processing
+            if not fully_processed:
+                needs_processing = True
                 break
 
-            # Check if facts exist for ALL matched_role x matched_concept combinations
-            # We need at least ONE fact per concept pattern (across all matched roles)
-            concepts_with_facts = set()
-
-            for concept in matched_concepts:
-                cid = concept["cid"]
-
-                # Check if a fact exists for this concept in any of the matched roles
-                query = """
-                    SELECT 1
-                    FROM facts f
-                    JOIN roles fr ON f.rid = fr.rid
-                    WHERE fr.access_no = ?
-                    AND f.cid = ?
-                    LIMIT 1
-                """
-                result = db.store.select(conn, query, (access_no, cid))
-                if is_ok(result) and result[1]:
-                    # Found a fact for this concept
-                    concepts_with_facts.add(cid)
-
-            # If we don't have facts for ALL matched concepts, this filing is missing facts for this group
-            matched_concept_ids = {c["cid"] for c in matched_concepts}
-            if concepts_with_facts != matched_concept_ids:
-                missing_for_any_group = True
-                break
-
-        if missing_for_any_group:
+        if needs_processing:
             filtered.append(filing)
 
     return filtered
