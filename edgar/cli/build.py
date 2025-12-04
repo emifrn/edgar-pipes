@@ -293,7 +293,7 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     if not groups:
         # No groups specified - process all groups
         requested_groups = list(groups_config.keys())
-        print(f"Processing all {len(requested_groups)} groups...")
+        print(f"Processing {len(requested_groups)} group(s)...")
     else:
         # Validate requested groups exist
         invalid_groups = [g for g in groups if g not in groups_config]
@@ -395,64 +395,6 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
         conn.close()
         print("✓ Build complete (no filings to process)")
         return ok(None)
-
-    # Step 4.5: Probe all roles for all filings upfront (cache role names)
-    total_roles = 0
-    fetched_count = 0
-    cached_count = 0
-
-    if verbose:
-        # Verbose mode - show each filing
-        print(f"Probing roles for {len(all_filings)} filing(s)...")
-        for i, filing in enumerate(all_filings, 1):
-            access_no = filing["access_no"]
-            filing_date = filing.get("filing_date", "?")
-            print(f"  [{i:2d}/{len(all_filings)}] {access_no} {filing_date}...", end=" ", flush=True)
-
-            result = cache.resolve_roles(conn, user_agent, cik, access_no)
-            if is_not_ok(result):
-                print(f"failed: {result[1]}")
-                continue
-
-            roles, source = result[1]
-            total_roles += len(roles)
-
-            if source == "sec":
-                print(f"cached {len(roles)} roles")
-                fetched_count += 1
-            else:
-                print(f"found {len(roles)} roles")
-                cached_count += 1
-    else:
-        # Non-verbose mode - use progress bar
-        with progress_bar("Probing roles") as progress:
-            task = progress.add_task("", total=len(all_filings), current="")
-
-            for filing in all_filings:
-                access_no = filing["access_no"]
-                filing_date = filing.get("filing_date", "?")
-
-                result = cache.resolve_roles(conn, user_agent, cik, access_no)
-                if is_not_ok(result):
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
-                    continue
-
-                roles, source = result[1]
-                total_roles += len(roles)
-
-                if source == "sec":
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: cached {len(roles)} roles")
-                    fetched_count += 1
-                else:
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: found {len(roles)} roles")
-                    cached_count += 1
-
-    if fetched_count > 0 and cached_count > 0:
-        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles ({fetched_count} from SEC, {cached_count} from DB)\n")
-    elif fetched_count > 0:
-        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles (all from SEC)\n")
-    else:
-        print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles (all from DB)\n")
 
     # Step 4: Build schema for all groups (roles, concepts, group linkages)
     print(f"Building schema for {len(groups_to_process)} group(s)...")
@@ -596,6 +538,7 @@ def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[
         print()
     else:
         # Progress bar mode
+        total_roles = 0
         with progress_bar("Processing") as progress:
             task = progress.add_task("", total=len(all_filings), current="")
 
@@ -609,33 +552,65 @@ def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[
                 )
 
                 if is_ok(result):
-                    total_inserted = result[1]
+                    stats = result[1]
+                    total_roles += stats["roles"]
                     progress.update(task, advance=1,
-                                  current=f"{access_no} {filing_date}: {total_inserted} facts")
+                                  current=f"{access_no} {filing_date}: {stats['inserted']} facts")
                 else:
                     progress.update(task, advance=1,
                                   current=f"{access_no} {filing_date}: ERROR")
 
         # Print summary
         total_inserted = sum(s["inserted"] for s in stats_by_group.values())
-        print(f"  ✓ Processed {len(all_filings)} filing(s), inserted {total_inserted} facts\n")
+        print(f"  ✓ Processed {len(all_filings)} filing(s): {total_roles} roles, {total_inserted} facts\n")
 
     return ok(None)
 
 
 def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
-                                  group_pattern_map: dict, stats_by_group: dict,
-                                  idx: int, total: int, verbose: bool) -> Result[int, str]:
+                group_pattern_map: dict, stats_by_group: dict,
+                idx: int, total: int, verbose: bool) -> Result[dict, str]:
     """
     Process a single filing for all groups. Loads Arelle model ONCE.
+    Also probes and caches roles if not already cached.
 
     Returns:
-        ok(total_inserted) on success, err(str) on failure
+        ok({"inserted": N, "roles": M}) on success, err(str) on failure
     """
     access_no = filing["access_no"]
     filing_date = filing.get("filing_date", "?")
 
-    # Get role mappings for all groups for this filing
+    # Resolve XBRL URL (fetch and cache if needed)
+    result = cache.resolve_xbrl_url(conn, user_agent, cik, access_no)
+    if is_not_ok(result):
+        return err(f"failed to get XBRL URL: {result[1]}")
+
+    url = result[1]
+    if not url:
+        return err("no XBRL file for this filing")
+
+    result = xbrl.arelle.load_model(url)
+    if is_not_ok(result):
+        return err(f"failed to load model: {result[1]}")
+
+    model = result[1]
+
+    # Probe and cache roles if not already cached (reusing loaded model)
+    result = db.queries.roles.select_by_filing(conn, access_no)
+    if is_not_ok(result):
+        return err(f"failed to check cached roles: {result[1]}")
+
+    cached_roles = result[1]
+    roles_count = len(cached_roles) if cached_roles else 0
+
+    if not cached_roles:
+        # Extract and cache roles from the already-loaded model
+        roles = xbrl.arelle.extract_roles(model)
+        for role in set(roles):
+            db.queries.roles.insert_or_ignore(conn, access_no, role)
+        roles_count = len(roles)
+
+    # Now get role mappings (roles are guaranteed to be cached)
     result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
     if is_not_ok(result):
         return err(f"failed to match roles: {result[1]}")
@@ -644,22 +619,7 @@ def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
     if not role_map:
         if verbose:
             print(f"  [{idx}/{total}] {access_no} {filing_date}: SKIP (no matching roles)")
-        return ok(0)
-
-    # Load Arelle model ONCE for this filing
-    result = db.queries.filings.get_xbrl_url(conn, access_no)
-    if is_not_ok(result):
-        return err(f"failed to get XBRL URL: {result[1]}")
-
-    url = result[1]
-    if not url:
-        return err("no XBRL URL cached")
-
-    result = xbrl.arelle.load_model(url)
-    if is_not_ok(result):
-        return err(f"failed to load model: {result[1]}")
-
-    model = result[1]
+        return ok({"inserted": 0, "roles": roles_count})
 
     # Extract DEI once
     dei = xbrl.arelle.extract_dei(model, access_no)
@@ -712,7 +672,7 @@ def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
         for pid in pattern_ids:
             db.queries.filing_patterns_processed.insert(conn, access_no, pid)
 
-    return ok(total_inserted)
+    return ok({"inserted": total_inserted, "roles": roles_count})
 
 
 def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[int, str]:
