@@ -30,7 +30,6 @@ class BuildContext:
     cik: str
     user_agent: str
     cfg: dict
-    verbose: bool = False
 
 
 # =============================================================================
@@ -43,7 +42,6 @@ def add_arguments(subparsers):
     parser_build.add_argument("groups", nargs="*", help="groups to build (default: all groups)")
     parser_build.add_argument("-c", "--check", action="store_true", help="validate ep.toml and report status (no build)")
     parser_build.add_argument("-s", "--status", action="store_true", help="show build status (groups, filings, facts)")
-    parser_build.add_argument("-v", "--verbose", action="store_true", help="show detailed output (role/concept patterns, full stats)")
     parser_build.set_defaults(func=run)
 
 
@@ -93,8 +91,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
 
     # Otherwise, build database
     groups = args.groups if args.groups else []
-    verbose = args.verbose
-    return run_build(root, cfg, groups, verbose)
+    return run_build(root, cfg, groups)
 
 
 def resolve_deps(groups_config: dict, requested_groups: list[str]) -> set[str]:
@@ -279,7 +276,7 @@ def run_status(root, cfg: dict) -> Result[None, str]:
     return ok(None)
 
 
-def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Result[None, str]:
+def run_build(root, cfg: dict, groups: list[str]) -> Result[None, str]:
     """Build database from ep.toml configuration."""
     start_time = datetime.now()
     ticker = config.get_ticker(cfg)
@@ -403,7 +400,7 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     total_roles = 0
     total_concepts = 0
     for i, group_name in enumerate(groups_to_process, 1):
-        result = schema(conn, cik, cfg, group_name, i, len(groups_to_process), verbose)
+        result = schema(conn, cik, cfg, group_name)
         if is_not_ok(result):
             print(f"ERROR: Failed to build schema for group '{group_name}': {result[1]}")
             conn.close()
@@ -411,14 +408,13 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
         total_roles += result[1].get("roles", 0)
         total_concepts += result[1].get("concepts", 0)
 
-    if not verbose:
-        print(f"  Matched {total_roles} role pattern(s), {total_concepts} concept pattern(s)")
+    print(f"  Matched {total_roles} role pattern(s), {total_concepts} concept pattern(s)")
     print()
 
     # Step 5: Process filings in chronological order (outer loop)
     # For each filing, extract facts for ALL groups (inner loop)
     # This ensures: 1) Model loaded once per filing, 2) Q1 before Q2 for all groups
-    result = extract(conn, cik, user_agent, cfg, groups_to_process, all_filings, verbose)
+    result = extract(conn, cik, user_agent, cfg, groups_to_process, all_filings)
     if is_not_ok(result):
         conn.close()
         return result
@@ -431,9 +427,7 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     return ok(None)
 
 
-def schema(conn, cik: str, cfg: dict, group_name: str,
-           group_index: int = 1, total_groups: int = 1,
-           verbose: bool = False) -> Result[dict[str, int], str]:
+def schema(conn, cik: str, cfg: dict, group_name: str) -> Result[dict[str, int], str]:
     """
     Build schema for a single group: roles, concepts, and group linkages.
     Does NOT extract facts - that's done separately in extract.
@@ -447,10 +441,6 @@ def schema(conn, cik: str, cfg: dict, group_name: str,
     role_count = 0
     concept_count = 0
 
-    if verbose:
-        parent_info = f" (derived from {group_spec['from']})" if is_derived else ""
-        print(f"  [{group_index:2d}/{total_groups}] {group_name}{parent_info}")
-
     # Get role name (inherit from parent if needed)
     role_name = group_spec.get("role")
     if not role_name and is_derived:
@@ -460,7 +450,7 @@ def schema(conn, cik: str, cfg: dict, group_name: str,
     # Insert role pattern
     if role_name:
         roles_to_insert = {role_name: cfg.get("roles", {}).get(role_name, {})}
-        result = roles(conn, cik, roles_to_insert, verbose)
+        result = roles(conn, cik, roles_to_insert)
         if is_not_ok(result):
             return err(f"schema: failed to insert role '{role_name}': {result[1]}")
         role_count = result[1]
@@ -473,7 +463,7 @@ def schema(conn, cik: str, cfg: dict, group_name: str,
         if defn.get("uid") in concept_uids
     }
 
-    result = concepts(conn, cik, concepts_to_insert, verbose)
+    result = concepts(conn, cik, concepts_to_insert)
     if is_not_ok(result):
         return err(f"schema: failed to insert concepts: {result[1]}")
     concept_count = result[1]
@@ -487,7 +477,7 @@ def schema(conn, cik: str, cfg: dict, group_name: str,
 
 
 def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[str],
-                       all_filings: list, verbose: bool = False) -> Result[None, str]:
+                       all_filings: list) -> Result[None, str]:
     """
     Process all filings in chronological order, extracting facts for ALL groups per filing.
     This ensures: 1) Arelle model loaded once per filing, 2) Q1 before Q2 for all groups.
@@ -499,7 +489,6 @@ def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[
         cfg: Full ep.toml configuration
         groups_to_process: List of group names to process
         all_filings: List of filings (already in chronological ASC order)
-        verbose: Show detailed output if True
 
     Returns:
         ok(None) on success, err(str) on failure
@@ -523,56 +512,38 @@ def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[
 
     stats_by_group = {g: {"candidates": 0, "chosen": 0, "inserted": 0} for g in group_pattern_map}
 
-    if verbose:
-        print(f"Processing {len(all_filings)} filing(s) for {len(group_pattern_map)} main group(s)...\n")
+    # Progress bar mode
+    total_roles = 0
+    with progress_bar("Processing") as progress:
+        task = progress.add_task("", total=len(all_filings), current="")
 
-        for idx, filing in enumerate(all_filings, 1):
+        for filing in all_filings:
+            access_no = filing["access_no"]
+            filing_date = filing.get("filing_date", "?")
+
             result = extract_one(
                 conn, cik, user_agent, cfg, filing, group_pattern_map,
-                stats_by_group, idx, len(all_filings), verbose
+                stats_by_group
             )
-            if is_not_ok(result):
-                print(f"  [{idx}/{len(all_filings)}] {filing['access_no']}: ERROR: {result[1]}")
 
-        # Print summary
-        for group_name, stats in stats_by_group.items():
-            if stats["inserted"] > 0:
-                print(f"  {group_name}: {stats['inserted']} facts inserted")
-        print()
-    else:
-        # Progress bar mode
-        total_roles = 0
-        with progress_bar("Processing") as progress:
-            task = progress.add_task("", total=len(all_filings), current="")
+            if is_ok(result):
+                stats = result[1]
+                total_roles += stats["roles"]
+                progress.update(task, advance=1,
+                              current=f"{access_no} {filing_date}: {stats['inserted']} facts")
+            else:
+                progress.update(task, advance=1,
+                              current=f"{access_no} {filing_date}: ERROR")
 
-            for filing in all_filings:
-                access_no = filing["access_no"]
-                filing_date = filing.get("filing_date", "?")
-
-                result = extract_one(
-                    conn, cik, user_agent, cfg, filing, group_pattern_map,
-                    stats_by_group, 0, 0, False
-                )
-
-                if is_ok(result):
-                    stats = result[1]
-                    total_roles += stats["roles"]
-                    progress.update(task, advance=1,
-                                  current=f"{access_no} {filing_date}: {stats['inserted']} facts")
-                else:
-                    progress.update(task, advance=1,
-                                  current=f"{access_no} {filing_date}: ERROR")
-
-        # Print summary
-        total_inserted = sum(s["inserted"] for s in stats_by_group.values())
-        print(f"  ✓ Processed {len(all_filings)} filing(s): {total_roles} roles, {total_inserted} facts\n")
+    # Print summary
+    total_inserted = sum(s["inserted"] for s in stats_by_group.values())
+    print(f"  ✓ Processed {len(all_filings)} filing(s): {total_roles} roles, {total_inserted} facts\n")
 
     return ok(None)
 
 
 def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
-                group_pattern_map: dict, stats_by_group: dict,
-                idx: int, total: int, verbose: bool) -> Result[dict, str]:
+                group_pattern_map: dict, stats_by_group: dict) -> Result[dict, str]:
     """
     Process a single filing for all groups. Loads Arelle model ONCE.
     Also probes and caches roles if not already cached.
@@ -620,8 +591,6 @@ def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
 
     role_map = result[1]
     if not role_map:
-        if verbose:
-            print(f"  [{idx}/{total}] {access_no} {filing_date}: SKIP (no matching roles)")
         return ok({"inserted": 0, "roles": roles_count})
 
     # Extract DEI once
@@ -664,13 +633,6 @@ def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
             stats_by_group[group_name]["inserted"] += stats["inserted"]
             total_inserted += stats["inserted"]
 
-            if verbose:
-                print(f"  [{idx}/{total}] {access_no} {filing_date} {fiscal_period} [{group_name}]: "
-                      f"cand={stats['candidates']} chosen={stats['chosen']} inserted={stats['inserted']}")
-        else:
-            if verbose:
-                print(f"  [{idx}/{total}] {access_no} {filing_date} [{group_name}]: ERROR: {result[1]}")
-
         # Mark as processed for this group (even if extraction failed)
         for pid in pattern_ids:
             db.queries.filing_patterns_processed.insert(conn, access_no, pid)
@@ -678,14 +640,11 @@ def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
     return ok({"inserted": total_inserted, "roles": roles_count})
 
 
-def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[int, str]:
+def roles(conn, cik: str, roles_config: dict) -> Result[int, str]:
     """Populate role patterns from ep.toml (idempotent). Returns count inserted."""
     for role_name, role_spec in roles_config.items():
         pattern = role_spec["pattern"]
         note = role_spec.get("note", "")
-
-        if verbose:
-            print(f"  Role: {role_name} → {pattern}")
 
         result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
         if is_not_ok(result) and "already exists" not in result[1]:
@@ -694,15 +653,12 @@ def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[i
     return ok(len(roles_config))
 
 
-def concepts(conn, cik: str, concepts_config: dict, verbose: bool = False) -> Result[int, str]:
+def concepts(conn, cik: str, concepts_config: dict) -> Result[int, str]:
     """Populate concept patterns from ep.toml (idempotent). Returns count inserted."""
     for concept_name, concept_spec in concepts_config.items():
         uid = concept_spec["uid"]
         pattern = concept_spec["pattern"]
         note = concept_spec.get("note", "")
-
-        if verbose:
-            print(f"  Concept: {concept_name} (uid={uid}) → {pattern}")
 
         result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
         if is_not_ok(result) and "already exists" not in result[1]:
