@@ -80,7 +80,6 @@ def cli_main(args):
         stdin_result = pipeline.read()
         if is_not_ok(stdin_result):
             error_msg = stdin_result[1]
-            # Can't write to journal yet - don't have workspace
             if pipeline.output_format() == 'packet':
                 print(pipeline.err(error_msg))
             else:

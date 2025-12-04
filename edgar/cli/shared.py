@@ -11,6 +11,8 @@ import datetime
 from tabulate import tabulate
 from typing import Any, TypedDict
 
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+
 
 class Cmd(TypedDict):
     name: str
@@ -241,3 +243,29 @@ def merge_stdin_field(field_name: str,
         merged_values.extend(explicit_values)
 
     return merged_values if merged_values else None
+
+
+def progress_bar(label: str = "Processing") -> Progress:
+    """
+    Create a standard progress bar for CLI commands.
+
+    Usage:
+        with progress_bar("Probing") as progress:
+            task = progress.add_task("", total=len(items), current="")
+            for item in items:
+                progress.update(task, advance=1, current=f"{item}: done")
+
+    Args:
+        label: Label to show before the progress bar
+
+    Returns:
+        Configured Progress context manager
+    """
+    return Progress(
+        TextColumn(f"  {label}:"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("({task.completed}/{task.total})"),
+        TextColumn("[cyan]{task.fields[current]}"),
+        TimeRemainingColumn(),
+    )

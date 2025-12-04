@@ -51,12 +51,12 @@ def find_toml(start_dir: Path | None = None) -> Path | None:
         current = parent
 
 
-def load_toml(context_workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
+def load_toml(workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
     """
     Load workspace configuration from ep.toml file.
 
     Args:
-        context_workspace: Workspace path from pipeline context (if available)
+        workspace: Workspace path from pipeline context (if available)
 
     Returns:
         Tuple of (root, cfg) - workspace root and configuration dict
@@ -64,9 +64,8 @@ def load_toml(context_workspace: str | None = None) -> tuple[Path, dict[str, Any
     Raises:
         RuntimeError: If no ep.toml file found
     """
-    # If context provides workspace, use that directory to find ep.toml
-    if context_workspace:
-        start_dir = Path(context_workspace)
+    if workspace:
+        start_dir = Path(workspace)
     else:
         start_dir = Path.cwd()
 
@@ -91,7 +90,6 @@ Or create one manually. See https://github.com/emifrn/edgar-pipes for more infor
     except Exception as e:
         raise RuntimeError(f"Error loading {ep_config_path}: {e}")
 
-    # Validate required fields
     required_fields = ["database", "ticker"]
     missing_fields = [field for field in required_fields if field not in cfg]
 
@@ -196,7 +194,6 @@ def validate(cfg: dict) -> Tuple[List[str], List[str]]:
     errors.extend(_validate_references(cfg))
     errors.extend(_validate_patterns(cfg))
     warnings.extend(_check_unused(cfg))
-
     return errors, warnings
 
 

@@ -61,16 +61,20 @@ def resolve_entities(conn: sqlite3.Connection, user_agent: str, tickers: list[st
     return ok((found, "db"))
 
 
-def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_types: set[str], date_filters: list[tuple[str, str, str]] | None = None, force: bool = False) -> Result[tuple[list[dict[str, Any]], str], str]:
+def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_types: set[str], date_filters: list[tuple[str, str, str]] | None = None, force: bool = False, sort_order: str = "ASC") -> Result[tuple[list[dict[str, Any]], str], str]:
     """
     Return recent filings for a CIK, fetch and cache if missing.
     Respects date_filters for both cached and fresh data.
     Returns tuple of (filings, source) where source is "db" or "sec".
+
+    Args:
+        sort_order: Sort order for filings ("ASC" or "DESC").
+                   Default "ASC" for chronological data processing.
     """
 
     if not force:
         # Check for cached filings with appropriate filter
-        result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters)
+        result = db.queries.filings.select_by_entity(conn, ciks=[cik], form_types=list(form_types), date_filters=date_filters, sort_order=sort_order)
 
         if is_not_ok(result):
             return result
@@ -107,6 +111,10 @@ def resolve_filings(conn: sqlite3.Connection, user_agent: str, cik: str, form_ty
                     filtered_filings = [f for f in filtered_filings if f["filing_date"] != value]
 
     if filtered_filings:
+        # Sort filings according to sort_order (SEC API returns newest first)
+        reverse = (sort_order == "DESC")
+        filtered_filings = sorted(filtered_filings, key=lambda f: f.get("filing_date", ""), reverse=reverse)
+
         # Cache the filtered filings
         result = db.store.insert_or_ignore(conn, "filings", filtered_filings)
         if is_not_ok(result):

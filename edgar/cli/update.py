@@ -60,7 +60,8 @@ def run(cmd: Cmd, args) -> Result[None, str]:
             ticker = company["ticker"].upper()
 
             # Get filings needing processing (filtered by group if group_filter is set)
-            result = db.queries.filings.select_by_entity(conn, ciks=[cik], group_filter=group_filter)
+            # Use ASC order to process oldest filings first (ensures Q1 before Q2)
+            result = db.queries.filings.select_by_entity(conn, ciks=[cik], group_filter=group_filter, sort_order="ASC")
             if is_not_ok(result):
                 print(f"  Error querying filings: {result[1]}", file=sys.stderr)
                 continue
@@ -114,34 +115,47 @@ def run(cmd: Cmd, args) -> Result[None, str]:
         return err(f"cli.update.run: {e}")
 
 
-def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map: dict[str, list[str]]) -> Result[dict[str, Any], str]:
+def _update_filing(conn: sqlite3.Connection, cik: str, access_no: str, role_map: dict[str, list[str]],
+                   model: Any = None, dei: dict[str, Any] | None = None) -> Result[dict[str, Any], str]:
     """
     Update facts for a single filing.
+
+    Args:
+        conn: Database connection
+        cik: Company CIK
+        access_no: Filing accession number
+        role_map: Map of group names to role tails
+        model: Optional pre-loaded Arelle model (if None, will load from database)
+        dei: Optional pre-extracted DEI data (if None, will extract from model)
+
     Returns dict with stats: {fiscal_period, candidates, chosen, inserted}
     """
-    # Get XBRL URL from database (should be cached by probe filings)
-    result = db.queries.filings.get_xbrl_url(conn, access_no)
-    if is_not_ok(result):
-        return err(f"Error getting XBRL URL: {result[1]}")
+    # Load model if not provided (backwards compatibility)
+    if model is None:
+        # Get XBRL URL from database (should be cached by probe filings)
+        result = db.queries.filings.get_xbrl_url(conn, access_no)
+        if is_not_ok(result):
+            return err(f"Error getting XBRL URL: {result[1]}")
 
-    url = result[1]
-    if not url:
-        return err("no XBRL URL cached; run 'probe filings' first")
+        url = result[1]
+        if not url:
+            return err("no XBRL URL cached; run 'probe filings' first")
 
-    # Load Arelle model
-    result = xbrl.arelle.load_model(url)
-    if is_not_ok(result):
-        return err(f"failed to load Arelle model: {result[1]}")
+        # Load Arelle model
+        result = xbrl.arelle.load_model(url)
+        if is_not_ok(result):
+            return err(f"failed to load Arelle model: {result[1]}")
 
-    model = result[1]
+        model = result[1]
 
-    # Extract DEI
-    dei = xbrl.arelle.extract_dei(model, access_no)
+    # Extract DEI if not provided
+    if dei is None:
+        dei = xbrl.arelle.extract_dei(model, access_no)
 
-    # Update DEI in database
-    result = db.queries.filings.insert_dei(conn, dei)
-    if is_not_ok(result):
-        return err(f"Error inserting DEI: {result[1]}")
+        # Update DEI in database
+        result = db.queries.filings.insert_dei(conn, dei)
+        if is_not_ok(result):
+            return err(f"Error inserting DEI: {result[1]}")
 
     fiscal_period = dei.get("fiscal_period", "?")
     fiscal_year = dei.get("fiscal_year")

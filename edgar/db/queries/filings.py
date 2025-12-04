@@ -85,7 +85,8 @@ def select_by_entity(conn: sqlite3.Connection,
                      form_types: Optional[list[str]] = None,
                      date_filters: Optional[list[tuple[str, str, str]]] = None,
                      stubs_only: bool = False,
-                     group_filter: Optional[set[str]] = None) -> Result[list[dict[str, Any]], str]:
+                     group_filter: Optional[set[str]] = None,
+                     sort_order: str = "DESC") -> Result[list[dict[str, Any]], str]:
     """
     Select filings with flexible filtering options.
 
@@ -99,6 +100,9 @@ def select_by_entity(conn: sqlite3.Connection,
         group_filter: If provided, only return filings that need processing for
                      this specific set of groups (checks processed patterns)
                      Note: group_filter takes precedence over stubs_only
+        sort_order: Sort order for filings by filing_date ("ASC" or "DESC").
+                   Default "DESC" (newest first) for display.
+                   Use "ASC" (oldest first) for chronological data processing.
     """
     base_query = """
         SELECT  f.access_no,
@@ -168,7 +172,10 @@ def select_by_entity(conn: sqlite3.Connection,
     else:
         query = base_query
 
-    query += " ORDER BY f.filing_date DESC"
+    # Validate and apply sort order
+    if sort_order not in ["ASC", "DESC"]:
+        return err(f"Invalid sort_order '{sort_order}'. Must be 'ASC' or 'DESC'.")
+    query += f" ORDER BY f.filing_date {sort_order}"
 
     # Execute the base query first
     result = db.store.select(conn, query, tuple(params))

@@ -5,14 +5,32 @@ Build database from ep.toml configuration. Validates schema and extracts facts.
 """
 import sys
 import sqlite3
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
 
 # Local modules
 from edgar import config
 from edgar import db
 from edgar import cache
-from edgar.cli.shared import Cmd
+from edgar import xbrl
+from edgar.cli.shared import Cmd, progress_bar
+from edgar.cli.update import _update_filing
 from edgar.result import Result, ok, err, is_not_ok, is_ok
+
+
+# =============================================================================
+# Context
+# =============================================================================
+
+@dataclass
+class BuildContext:
+    """Shared context for build operations."""
+    conn: sqlite3.Connection
+    cik: str
+    user_agent: str
+    cfg: dict
+    verbose: bool = False
 
 
 # =============================================================================
@@ -79,7 +97,7 @@ def run(cmd: Cmd, args) -> Result[None, str]:
     return run_build(root, cfg, groups, verbose)
 
 
-def resolve_group_dependencies(groups_config: dict, requested_groups: list[str]) -> set[str]:
+def resolve_deps(groups_config: dict, requested_groups: list[str]) -> set[str]:
     """
     Resolve group dependencies by recursively including parent groups.
 
@@ -287,7 +305,7 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
         print(f"Processing {len(requested_groups)} group(s): {', '.join(requested_groups)}...")
 
     # Resolve dependencies: include parent groups for derived groups
-    groups_with_deps = resolve_group_dependencies(groups_config, requested_groups)
+    groups_with_deps = resolve_deps(groups_config, requested_groups)
 
     # Order groups: main groups first, then derived (topological sort)
     groups_to_process = order_groups(groups_config, groups_with_deps)
@@ -353,7 +371,6 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
         print(f"Found company: {entity['name']} (CIK: {cik})\n")
 
     # Determine cutoff date for filing fetch (default: 10 years ago)
-    from datetime import datetime, timedelta
     cutoff = cfg.get("cutoff")
     if not cutoff:
         ten_years_ago = datetime.now() - timedelta(days=365*10)
@@ -408,14 +425,8 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
                 cached_count += 1
     else:
         # Non-verbose mode - use progress bar
-        with Progress(
-            TextColumn("  Probing roles:"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("({task.completed}/{task.total})"),
-            TextColumn("[cyan]{task.fields[current]}"),
-        ) as progress:
-            task = progress.add_task("Probing", total=len(all_filings), current="")
+        with progress_bar("Probing roles") as progress:
+            task = progress.add_task("", total=len(all_filings), current="")
 
             for filing in all_filings:
                 access_no = filing["access_no"]
@@ -443,13 +454,30 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     else:
         print(f"✓ Probed {len(all_filings)} filings: {total_roles} total roles (all from DB)\n")
 
-    # Process groups one at a time
+    # Step 4: Build schema for all groups (roles, concepts, group linkages)
+    print(f"Building schema for {len(groups_to_process)} group(s)...")
+    total_roles = 0
+    total_concepts = 0
     for i, group_name in enumerate(groups_to_process, 1):
-        result = build_group(conn, cik, ticker, user_agent, cfg, group_name, all_filings, i, len(groups_to_process), verbose)
+        result = schema(conn, cik, cfg, group_name, i, len(groups_to_process), verbose)
         if is_not_ok(result):
-            print(f"ERROR: Failed to build group '{group_name}': {result[1]}")
-            # Continue with other groups instead of failing completely
-            continue
+            print(f"ERROR: Failed to build schema for group '{group_name}': {result[1]}")
+            conn.close()
+            return result
+        total_roles += result[1].get("roles", 0)
+        total_concepts += result[1].get("concepts", 0)
+
+    if not verbose:
+        print(f"  Matched {total_roles} role pattern(s), {total_concepts} concept pattern(s)")
+    print()
+
+    # Step 5: Process filings in chronological order (outer loop)
+    # For each filing, extract facts for ALL groups (inner loop)
+    # This ensures: 1) Model loaded once per filing, 2) Q1 before Q2 for all groups
+    result = extract(conn, cik, user_agent, cfg, groups_to_process, all_filings, verbose)
+    if is_not_ok(result):
+        conn.close()
+        return result
 
     conn.commit()
     conn.close()
@@ -458,404 +486,316 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     return ok(None)
 
 
-def build_group(conn, cik: str, ticker: str, user_agent: str, cfg: dict, group_name: str, all_filings: list,
-                group_index: int = 1, total_groups: int = 1, verbose: bool = False) -> Result[None, str]:
+def schema(conn, cik: str, cfg: dict, group_name: str,
+           group_index: int = 1, total_groups: int = 1,
+           verbose: bool = False) -> Result[dict[str, int], str]:
     """
-    Build a single group: populate schema and extract facts.
+    Build schema for a single group: roles, concepts, and group linkages.
+    Does NOT extract facts - that's done separately in extract.
+
+    Returns:
+        ok({"roles": N, "concepts": M}) on success, err(str) on failure
+    """
+    groups_config = cfg.get("groups", {})
+    group_spec = groups_config.get(group_name, {})
+    is_derived = "from" in group_spec
+    role_count = 0
+    concept_count = 0
+
+    if verbose:
+        parent_info = f" (derived from {group_spec['from']})" if is_derived else ""
+        print(f"  [{group_index:2d}/{total_groups}] {group_name}{parent_info}")
+
+    # Get role name (inherit from parent if needed)
+    role_name = group_spec.get("role")
+    if not role_name and is_derived:
+        parent_spec = groups_config.get(group_spec["from"], {})
+        role_name = parent_spec.get("role")
+
+    # Insert role pattern
+    if role_name:
+        roles_to_insert = {role_name: cfg.get("roles", {}).get(role_name, {})}
+        result = roles(conn, cik, roles_to_insert, verbose)
+        if is_not_ok(result):
+            return err(f"schema: failed to insert role '{role_name}': {result[1]}")
+        role_count = result[1]
+
+    # Insert concept patterns for this group
+    concept_uids = group_spec.get("concepts", [])
+    concepts_config = cfg.get("concepts", {})
+    concepts_to_insert = {
+        name: defn for name, defn in concepts_config.items()
+        if defn.get("uid") in concept_uids
+    }
+
+    result = concepts(conn, cik, concepts_to_insert, verbose)
+    if is_not_ok(result):
+        return err(f"schema: failed to insert concepts: {result[1]}")
+    concept_count = result[1]
+
+    # Insert group and link to role/concepts
+    result = groups(conn, cik, cfg, [group_name])
+    if is_not_ok(result):
+        return err(f"schema: failed to insert group: {result[1]}")
+
+    return ok({"roles": role_count, "concepts": concept_count})
+
+
+def extract(conn, cik: str, user_agent: str, cfg: dict, groups_to_process: list[str],
+                       all_filings: list, verbose: bool = False) -> Result[None, str]:
+    """
+    Process all filings in chronological order, extracting facts for ALL groups per filing.
+    This ensures: 1) Arelle model loaded once per filing, 2) Q1 before Q2 for all groups.
 
     Args:
         conn: Database connection
         cik: Company CIK
-        ticker: Company ticker
         user_agent: SEC API user agent
         cfg: Full ep.toml configuration
-        group_name: Name of group to build
-        all_filings: List of all available filings
-        group_index: Current group number (1-based)
-        total_groups: Total number of groups being processed
+        groups_to_process: List of group names to process
+        all_filings: List of filings (already in chronological ASC order)
         verbose: Show detailed output if True
 
     Returns:
         ok(None) on success, err(str) on failure
     """
-    from edgar import xbrl
-    from edgar.cli.update import _update_filing
-
     groups_config = cfg.get("groups", {})
-    group_spec = groups_config.get(group_name, {})
 
-    # Check if this is a derived group (has 'from' field)
-    is_derived = "from" in group_spec
+    # Build map of group -> pattern_ids for processed checking
+    group_pattern_map = {}
+    for group_name in groups_to_process:
+        # Skip derived groups - they share facts with parent
+        if "from" in groups_config.get(group_name, {}):
+            continue
 
-    # Print header (different format for derived vs main groups)
-    if not is_derived:
-        print(f"[{group_name}]")
+        concept_uids = groups_config[group_name].get("concepts", [])
+        pattern_ids = []
+        for uid in concept_uids:
+            result = db.queries.concept_patterns.get_by_uid(conn, cik, uid)
+            if is_ok(result) and result[1]:
+                pattern_ids.append(result[1]["pid"])
+        group_pattern_map[group_name] = pattern_ids
 
-    # Step 1: Populate schema for this group
-    # Get role name (inherit from parent if needed)
-    role_name = group_spec.get("role")
-    if not role_name and "from" in group_spec:
-        parent_name = group_spec["from"]
-        parent_spec = groups_config.get(parent_name, {})
-        role_name = parent_spec.get("role")
-
-    # Insert role pattern if not already present
-    if role_name:
-        roles_to_insert = {role_name: cfg.get("roles", {}).get(role_name, {})}
-        result = roles(conn, cik, roles_to_insert, verbose)
-        if is_not_ok(result):
-            return err(f"build_group: failed to insert role '{role_name}': {result[1]}")
-
-    # Insert concept patterns for concepts in this group
-    concept_uids = group_spec.get("concepts", [])
-    concepts_config = cfg.get("concepts", {})
-    concepts_to_insert = {}
-
-    for concept_name, concept_def in concepts_config.items():
-        if concept_def.get("uid") in concept_uids:
-            concepts_to_insert[concept_name] = concept_def
-
-    result = concepts(conn, cik, concepts_to_insert, verbose)
-    if is_not_ok(result):
-        return err(f"build_group: failed to insert concepts: {result[1]}")
-
-    # Insert group and link to role/concepts
-    result = groups(conn, cik, cfg, [group_name])
-    if is_not_ok(result):
-        return err(f"build_group: failed to insert group: {result[1]}")
-
-    # If this is a derived group, we're done - facts are already extracted by parent
-    if is_derived:
-        parent_name = group_spec["from"]
-        print(f"[{group_index:2d}/{total_groups}] {group_name} derived from {parent_name}")
-        return ok(None)
-
-    # Step 2: Get pattern IDs for this group to check processed status
-    concept_uids = group_spec.get("concepts", [])
-    pattern_ids = []
-    for uid in concept_uids:
-        result_pattern = db.queries.concept_patterns.get_by_uid(conn, cik, uid)
-        if is_ok(result_pattern) and result_pattern[1]:
-            pattern_ids.append(result_pattern[1]["pid"])
-
-    # Check if all filings are already processed
-    all_processed = True
-    for filing in all_filings:
-        result = db.queries.filing_patterns_processed.is_fully_processed(conn, filing["access_no"], pattern_ids)
-        if is_ok(result) and not result[1]:
-            all_processed = False
-            break
-
-    if all_processed and pattern_ids:
-        print(f"  ✓ All {len(all_filings)} filings already processed\n")
-        return ok(None)
-
-    # Step 3: Extract facts from filings for this group
-    stats_total = {"candidates": 0, "chosen": 0, "inserted": 0}
+    stats_by_group = {g: {"candidates": 0, "chosen": 0, "inserted": 0} for g in group_pattern_map}
 
     if verbose:
-        # Verbose mode - show detailed output for each filing
-        print(f"  Processing {len(all_filings)} filing(s)...\n")
+        print(f"Processing {len(all_filings)} filing(s) for {len(group_pattern_map)} main group(s)...\n")
 
         for idx, filing in enumerate(all_filings, 1):
-            access_no = filing["access_no"]
-            filing_date = filing.get("filing_date", "?")
-
-            # Check if this filing is already processed
-            result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
-            if is_ok(result) and result[1]:
-                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: already processed")
-                continue
-
-            # Match roles against this specific group (roles already probed upfront)
-            result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
+            result = extract_one(
+                conn, cik, user_agent, cfg, filing, group_pattern_map,
+                stats_by_group, idx, len(all_filings), verbose
+            )
             if is_not_ok(result):
-                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: ERROR matching roles")
-                continue
+                print(f"  [{idx}/{len(all_filings)}] {filing['access_no']}: ERROR: {result[1]}")
 
-            role_map = result[1]
-            if not role_map or group_name not in role_map:
-                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: SKIP (no matching roles)")
-                continue
-
-            # Filter to only this group
-            role_map_filtered = {group_name: role_map[group_name]}
-
-            # Probe concepts for matched roles
-            for role_tail in role_map_filtered[group_name]:
-                result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
-                if is_not_ok(result):
-                    print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: WARN probing concepts for {role_tail}")
-                # Don't need to extract the data here, just ensuring concepts are cached
-
-            # Extract facts for this group
-            result = _update_filing(conn, cik, access_no, role_map_filtered)
-
-            if is_ok(result):
-                stats = result[1]
-                stats_total["candidates"] += stats["candidates"]
-                stats_total["chosen"] += stats["chosen"]
-                stats_total["inserted"] += stats["inserted"]
-                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date} {stats['fiscal_period']}: "
-                      f"cand={stats['candidates']} chosen={stats['chosen']} inserted={stats['inserted']}")
-            else:
-                print(f"  [{idx}/{len(all_filings)}] {access_no} {filing_date}: ERROR extracting facts: {result[1]}")
-
-            # Mark all concept patterns for this group as processed (regardless of success/failure)
-            # This enables incremental builds to skip this filing next time
-            for pid in pattern_ids:
-                db.queries.filing_patterns_processed.insert(conn, access_no, pid)
-
-        print(f"  ✓ Processed {len(all_filings)} filing(s): "
-              f"{stats_total['candidates']} candidates, "
-              f"{stats_total['chosen']} chosen, "
-              f"{stats_total['inserted']} inserted\n")
+        # Print summary
+        for group_name, stats in stats_by_group.items():
+            if stats["inserted"] > 0:
+                print(f"  {group_name}: {stats['inserted']} facts inserted")
+        print()
     else:
-        # Non-verbose mode - use progress bar
-        with Progress(
-            TextColumn("  Processing:"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("({task.completed}/{task.total})"),
-            TextColumn("[cyan]{task.fields[current]}"),
-            TimeRemainingColumn(),
-        ) as progress:
-            task = progress.add_task("Processing", total=len(all_filings), current="")
+        # Progress bar mode
+        with progress_bar("Processing") as progress:
+            task = progress.add_task("", total=len(all_filings), current="")
 
             for filing in all_filings:
                 access_no = filing["access_no"]
                 filing_date = filing.get("filing_date", "?")
 
-                # Check if this filing is already processed
-                result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
-                if is_ok(result) and result[1]:
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: already processed")
-                    continue
-
-                # Match roles against this specific group (roles already probed upfront)
-                result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
-                if is_not_ok(result):
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
-                    continue
-
-                role_map = result[1]
-                if not role_map or group_name not in role_map:
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: SKIP")
-                    continue
-
-                # Filter to only this group
-                role_map_filtered = {group_name: role_map[group_name]}
-
-                # Probe concepts for matched roles
-                for role_tail in role_map_filtered[group_name]:
-                    result = cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
-                    # Don't need to extract the data here, just ensuring concepts are cached
-
-                # Extract facts for this group
-                result = _update_filing(conn, cik, access_no, role_map_filtered)
+                result = extract_one(
+                    conn, cik, user_agent, cfg, filing, group_pattern_map,
+                    stats_by_group, 0, 0, False
+                )
 
                 if is_ok(result):
-                    stats = result[1]
-                    stats_total["candidates"] += stats["candidates"]
-                    stats_total["chosen"] += stats["chosen"]
-                    stats_total["inserted"] += stats["inserted"]
+                    total_inserted = result[1]
                     progress.update(task, advance=1,
-                                  current=f"{access_no} {filing_date} {stats['fiscal_period']}: {stats['inserted']} facts")
+                                  current=f"{access_no} {filing_date}: {total_inserted} facts")
                 else:
-                    progress.update(task, advance=1, current=f"{access_no} {filing_date}: ERROR")
-
-                # Mark all concept patterns for this group as processed (regardless of success/failure)
-                # This enables incremental builds to skip this filing next time
-                for pid in pattern_ids:
-                    db.queries.filing_patterns_processed.insert(conn, access_no, pid)
-
-        print(f"  ✓ Processed {len(all_filings)} filing(s), inserted {stats_total['inserted']} facts\n")
-
-    return ok(None)
-
-
-def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[None, str]:
-    """
-    Populate role patterns from ep.toml (idempotent).
-
-    Called as: build.roles(conn, cik, roles_config, verbose)
-
-    Args:
-        conn: Database connection
-        cik: Company CIK
-        roles_config: Roles section from ep.toml
-        verbose: Show detailed output if True
-
-    Returns:
-        ok(None) on success, err(str) on failure
-    """
-    if verbose:
-        # Detailed output - show each role pattern
-        for role_name, role_spec in roles_config.items():
-            pattern = role_spec["pattern"]
-            note = role_spec.get("note", "")
-
-            print(f"  Role pattern:")
-            print(f"    Name: {role_name}")
-            print(f"    Pattern: {pattern}")
-            if note:
-                print(f"    Note: {note}")
-
-            # Try to insert (idempotent - ignore if exists)
-            result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
-            if is_not_ok(result):
-                # If already exists, that's fine
-                if "already exists" not in result[1]:
-                    return err(f"build.roles: failed to insert '{role_name}': {result[1]}")
-    else:
-        # Summary output - just show count
-        for role_name, role_spec in roles_config.items():
-            pattern = role_spec["pattern"]
-            note = role_spec.get("note", "")
-
-            # Try to insert (idempotent - ignore if exists)
-            result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
-            if is_not_ok(result):
-                # If already exists, that's fine
-                if "already exists" not in result[1]:
-                    return err(f"build.roles: failed to insert '{role_name}': {result[1]}")
+                    progress.update(task, advance=1,
+                                  current=f"{access_no} {filing_date}: ERROR")
 
         # Print summary
-        if roles_config:
-            print(f"  Matched {len(roles_config)} role pattern(s)")
+        total_inserted = sum(s["inserted"] for s in stats_by_group.values())
+        print(f"  ✓ Processed {len(all_filings)} filing(s), inserted {total_inserted} facts\n")
 
     return ok(None)
 
 
-def concepts(conn, cik: str, concepts_config: dict, verbose: bool = False) -> Result[None, str]:
+def extract_one(conn, cik: str, user_agent: str, cfg: dict, filing: dict,
+                                  group_pattern_map: dict, stats_by_group: dict,
+                                  idx: int, total: int, verbose: bool) -> Result[int, str]:
     """
-    Populate concept patterns from ep.toml (idempotent).
-
-    Called as: build.concepts(conn, cik, concepts_config, verbose)
-
-    Args:
-        conn: Database connection
-        cik: Company CIK
-        concepts_config: Concepts section from ep.toml
-        verbose: Show detailed output if True
+    Process a single filing for all groups. Loads Arelle model ONCE.
 
     Returns:
-        ok(None) on success, err(str) on failure
+        ok(total_inserted) on success, err(str) on failure
     """
-    if verbose:
-        # Detailed output - show each concept pattern
-        for concept_name, concept_spec in concepts_config.items():
-            uid = concept_spec["uid"]
-            pattern = concept_spec["pattern"]
-            note = concept_spec.get("note", "")
+    access_no = filing["access_no"]
+    filing_date = filing.get("filing_date", "?")
 
-            print(f"  Concept pattern:")
-            print(f"    Name: {concept_name}")
-            print(f"    Pattern: {pattern}")
-            if note:
-                print(f"    Note: {note}")
-            print(f"    UID: {uid}")
+    # Get role mappings for all groups for this filing
+    result = db.queries.role_patterns.match_groups_for_filing(conn, cik, access_no)
+    if is_not_ok(result):
+        return err(f"failed to match roles: {result[1]}")
 
-            # Try to insert (idempotent - ignore if exists)
-            result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
-            if is_not_ok(result):
-                # If already exists, that's fine
-                if "already exists" not in result[1]:
-                    return err(f"build.concepts: failed to insert '{concept_name}': {result[1]}")
-    else:
-        # Summary output - just show count
-        for concept_name, concept_spec in concepts_config.items():
-            uid = concept_spec["uid"]
-            pattern = concept_spec["pattern"]
-            note = concept_spec.get("note", "")
+    role_map = result[1]
+    if not role_map:
+        if verbose:
+            print(f"  [{idx}/{total}] {access_no} {filing_date}: SKIP (no matching roles)")
+        return ok(0)
 
-            # Try to insert (idempotent - ignore if exists)
-            result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
-            if is_not_ok(result):
-                # If already exists, that's fine
-                if "already exists" not in result[1]:
-                    return err(f"build.concepts: failed to insert '{concept_name}': {result[1]}")
+    # Load Arelle model ONCE for this filing
+    result = db.queries.filings.get_xbrl_url(conn, access_no)
+    if is_not_ok(result):
+        return err(f"failed to get XBRL URL: {result[1]}")
 
-        # Print summary
-        if concepts_config:
-            print(f"  Matched {len(concepts_config)} concept pattern(s)")
+    url = result[1]
+    if not url:
+        return err("no XBRL URL cached")
 
-    return ok(None)
+    result = xbrl.arelle.load_model(url)
+    if is_not_ok(result):
+        return err(f"failed to load model: {result[1]}")
+
+    model = result[1]
+
+    # Extract DEI once
+    dei = xbrl.arelle.extract_dei(model, access_no)
+    result = db.queries.filings.insert_dei(conn, dei)
+    if is_not_ok(result):
+        return err(f"failed to insert DEI: {result[1]}")
+
+    fiscal_period = dei.get("fiscal_period", "?")
+    total_inserted = 0
+
+    # Process each group that has matching roles
+    for group_name, pattern_ids in group_pattern_map.items():
+        # Check if already processed for this group
+        result = db.queries.filing_patterns_processed.is_fully_processed(conn, access_no, pattern_ids)
+        if is_ok(result) and result[1]:
+            continue  # Already processed for this group
+
+        # Check if this group has matching roles
+        if group_name not in role_map:
+            # Mark as processed even if no roles (fact doesn't exist in this filing)
+            for pid in pattern_ids:
+                db.queries.filing_patterns_processed.insert(conn, access_no, pid)
+            continue
+
+        # Filter role_map to just this group
+        role_map_filtered = {group_name: role_map[group_name]}
+
+        # Probe concepts for this group's roles
+        for role_tail in role_map_filtered[group_name]:
+            cache.resolve_concepts(conn, user_agent, cik, access_no, role_tail)
+
+        # Extract facts for this group (passing already-loaded model and DEI)
+        result = _update_filing(conn, cik, access_no, role_map_filtered, model=model, dei=dei)
+
+        if is_ok(result):
+            stats = result[1]
+            stats_by_group[group_name]["candidates"] += stats["candidates"]
+            stats_by_group[group_name]["chosen"] += stats["chosen"]
+            stats_by_group[group_name]["inserted"] += stats["inserted"]
+            total_inserted += stats["inserted"]
+
+            if verbose:
+                print(f"  [{idx}/{total}] {access_no} {filing_date} {fiscal_period} [{group_name}]: "
+                      f"cand={stats['candidates']} chosen={stats['chosen']} inserted={stats['inserted']}")
+        else:
+            if verbose:
+                print(f"  [{idx}/{total}] {access_no} {filing_date} [{group_name}]: ERROR: {result[1]}")
+
+        # Mark as processed for this group (even if extraction failed)
+        for pid in pattern_ids:
+            db.queries.filing_patterns_processed.insert(conn, access_no, pid)
+
+    return ok(total_inserted)
+
+
+def roles(conn, cik: str, roles_config: dict, verbose: bool = False) -> Result[int, str]:
+    """Populate role patterns from ep.toml (idempotent). Returns count inserted."""
+    for role_name, role_spec in roles_config.items():
+        pattern = role_spec["pattern"]
+        note = role_spec.get("note", "")
+
+        if verbose:
+            print(f"  Role: {role_name} → {pattern}")
+
+        result = db.queries.role_patterns.insert(conn, cik, role_name, pattern, note)
+        if is_not_ok(result) and "already exists" not in result[1]:
+            return err(f"roles: failed to insert '{role_name}': {result[1]}")
+
+    return ok(len(roles_config))
+
+
+def concepts(conn, cik: str, concepts_config: dict, verbose: bool = False) -> Result[int, str]:
+    """Populate concept patterns from ep.toml (idempotent). Returns count inserted."""
+    for concept_name, concept_spec in concepts_config.items():
+        uid = concept_spec["uid"]
+        pattern = concept_spec["pattern"]
+        note = concept_spec.get("note", "")
+
+        if verbose:
+            print(f"  Concept: {concept_name} (uid={uid}) → {pattern}")
+
+        result = db.queries.concept_patterns.insert(conn, cik, concept_name, pattern, uid, note)
+        if is_not_ok(result) and "already exists" not in result[1]:
+            return err(f"concepts: failed to insert '{concept_name}': {result[1]}")
+
+    return ok(len(concepts_config))
 
 
 def groups(conn, cik: str, cfg: dict, groups_to_process: list[str]) -> Result[None, str]:
-    """
-    Populate groups and link them to roles/concepts from ep.toml (idempotent).
-
-    Called as: build.groups(conn, cik, cfg, groups_to_process)
-
-    Args:
-        conn: Database connection
-        cik: Company CIK
-        cfg: Full ep.toml configuration
-        groups_to_process: List of group names to process
-
-    Returns:
-        ok(None) on success, err(str) on failure
-    """
+    """Populate groups and link to roles/concepts from ep.toml (idempotent)."""
     groups_config = cfg.get("groups", {})
 
     for group_name, group_spec in groups_config.items():
-        # Skip groups not in the target list
         if group_name not in groups_to_process:
             continue
-        # Insert group (idempotent)
+
         result = db.queries.groups.insert_or_ignore(conn, group_name)
         if is_not_ok(result):
-            return err(f"build.groups: failed to insert group '{group_name}': {result[1]}")
+            return err(f"groups: failed to insert '{group_name}': {result[1]}")
 
         gid = result[1]
 
         # Determine role (inherit from parent if using 'from')
         role_name = group_spec.get("role")
         if not role_name and "from" in group_spec:
-            # Inherit role from parent group
-            parent_group_name = group_spec["from"]
-            parent_group_spec = groups_config.get(parent_group_name)
-            if parent_group_spec:
-                role_name = parent_group_spec.get("role")
+            parent_spec = groups_config.get(group_spec["from"])
+            if parent_spec:
+                role_name = parent_spec.get("role")
 
         # Link role to group
         if role_name:
-            # Get role pattern ID
             result = db.queries.role_patterns.get(conn, cik, role_name)
             if is_not_ok(result):
-                return err(f"build.groups: failed to get role pattern '{role_name}': {result[1]}")
+                return err(f"groups: role pattern '{role_name}' not found: {result[1]}")
 
             role_pattern = result[1]
             if not role_pattern:
-                return err(f"build.groups: role pattern '{role_name}' not found for group '{group_name}'")
+                return err(f"groups: role pattern '{role_name}' not found for '{group_name}'")
 
-            pid = role_pattern["pid"]
-
-            # Link gid ↔ pid (idempotent)
-            link_data = [{"gid": gid, "pid": pid}]
+            link_data = [{"gid": gid, "pid": role_pattern["pid"]}]
             result = db.store.insert_or_ignore(conn, "group_role_patterns", link_data)
             if is_not_ok(result):
-                return err(f"build.groups: failed to link role '{role_name}' to group '{group_name}': {result[1]}")
+                return err(f"groups: failed to link role '{role_name}' to '{group_name}': {result[1]}")
 
         # Link concepts to group
-        concept_uids = group_spec.get("concepts", [])
-        for uid in concept_uids:
-            # Get concept pattern ID by UID
+        for uid in group_spec.get("concepts", []):
             result = db.queries.concept_patterns.get_by_uid(conn, cik, str(uid))
             if is_not_ok(result):
-                return err(f"build.groups: failed to get concept pattern uid={uid}: {result[1]}")
+                return err(f"groups: concept uid={uid} not found: {result[1]}")
 
             concept_pattern = result[1]
             if not concept_pattern:
-                return err(f"build.groups: concept pattern uid={uid} not found for group '{group_name}'")
+                return err(f"groups: concept uid={uid} not found for '{group_name}'")
 
-            pid = concept_pattern["pid"]
-
-            # Link gid ↔ pid (idempotent)
-            result = db.queries.groups.link_concept_pattern(conn, gid, pid)
+            result = db.queries.groups.link_concept_pattern(conn, gid, concept_pattern["pid"])
             if is_not_ok(result):
-                return err(f"build.groups: failed to link concept uid={uid} to group '{group_name}': {result[1]}")
+                return err(f"groups: failed to link concept uid={uid} to '{group_name}': {result[1]}")
 
     return ok(None)
