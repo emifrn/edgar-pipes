@@ -281,6 +281,7 @@ def run_status(root, cfg: dict) -> Result[None, str]:
 
 def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Result[None, str]:
     """Build database from ep.toml configuration."""
+    start_time = datetime.now()
     ticker = config.get_ticker(cfg)
     db_path = config.get_db_path(root, cfg)
 
@@ -393,7 +394,8 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     if not all_filings:
         conn.commit()
         conn.close()
-        print("✓ Build complete (no filings to process)")
+        elapsed = datetime.now() - start_time
+        print(f"✓ Build complete in {elapsed.total_seconds():.1f}s (no filings to process)")
         return ok(None)
 
     # Step 4: Build schema for all groups (roles, concepts, group linkages)
@@ -424,7 +426,8 @@ def run_build(root, cfg: dict, groups: list[str], verbose: bool = False) -> Resu
     conn.commit()
     conn.close()
 
-    print("\n✓ Build complete")
+    elapsed = datetime.now() - start_time
+    print(f"\n✓ Build complete in {elapsed.total_seconds():.1f}s")
     return ok(None)
 
 
