@@ -4,8 +4,6 @@ High-level overview of the system design and architectural choices. This
 document provides the conceptual framework for understanding how edgar-pipes
 components work together.
 
-See **[Examples](../examples/)** for sample workflows demonstrating the system in action.
-
 ## Component layers
 
 The edgar-pipes command fetches company financial data from the public database

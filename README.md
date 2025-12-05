@@ -332,7 +332,6 @@ Created by emifrn
 ## Documentation
 
 - **[CHEATSHEET.md](CHEATSHEET.md)** - Quick command reference
-- **[Examples](docs/examples/)** - Sample ep.toml configurations
 - **[Architecture](docs/developers/architecture.md)** - System design for contributors
 
 ## Support
