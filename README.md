@@ -20,32 +20,20 @@ of a subcommand becomes the input of the next one. This mechanism enables
 composable and highly adaptable data-pipelines with zero programming
 requirements. This approach shifts the focus from building software for
 financial data extraction to a more interactive exploration of financial
-information directly in the Linux terminal, enabling all kinds of analysis and
-reporting solutions.
+information directly in the Linux terminal.
 
-The typical edgar-pipes workflow includes subcommands that **probe** XBRL
-filings via EDGAR API. **Select** tags with their historical variations via
-pattern matching across filings. Create **new** user defined groups for
-consistent data retrieval over time and across companies. **Update** a local
-SQLite3 database with the latest XBRL facts, and **report** financial data
-based on previously defined groups, e.g. 'Balance', 'Balance.Assets',
-'Balance.Assets.Current', 'Operations', 'CashFlow', etc. etc. 
+edgar-pipes uses pattern matching to handle XBRL data variability: role URIs
+and concept tags that change over time, vary between companies, and evolve with
+new accounting standards. Patterns are defined in a declarative `ep.toml`
+configuration file that is human-readable and version-controllable.
 
-### Reproducible workflows
+The progressive discovery workflow enables users to:
 
-edgar-pipes uses a declarative configuration approach with `ep.toml` files.
-All workspace settings, XBRL schema definitions (roles, concepts, groups), and
-targets are defined in a single TOML file that is human-readable and
-version-controllable.
-
-In short, edgar-pipes enables a progressive discovery workflow that allows
-users to:
-
-1. **Discover** what data exists in filings interactively
-2. **Select** filings, roles and concepts they care about
-3. **Extract** financial facts into a local database with incremental updates
-4. **Report** tabular data from local database in the preferred format
-5. **Update** with latest facts as they become available with new Company filings
+1. **Initialize** workspace and build database with filing metadata
+2. **Explore** available role names and concept tags interactively
+3. **Define** role and concept patterns in ep.toml
+4. **Build** database to extract facts matching defined patterns
+5. **Report** financial data from local database
 
 
 ## Key Concepts
@@ -55,87 +43,49 @@ edgar-pipes uses a three-layer architecture for organizing financial data:
 ### Roles
 
 Define **where** to look in XBRL filings (which sections to examine). In XBRL
-documents, presentation roles (also called role URIs or networks) organize
-financial data into sections like balance sheets, income statements, cash flow
-statements and many more. Each role has a URI identifier such as
-`http://company.com/role/ConsolidatedBalanceSheets`. However, role URIs often
-change between filings, even for the same company, as reporting structures are
-refined. 
+documents, presentation roles organize financial data into sections like
+balance sheets, income statements, and cash flow statements. Each role has a
+URI identifier. However, role URIs often change between filings, even for the
+same company.
 
-A role in edgar-pipes consists of:
+A role pattern in edgar-pipes consists of:
 
-- **name**: A user defined semantic label (e.g., "Balance Sheet")
-- **pattern**: A regex that matches role URIs (e.g., `".*BalanceSheet.*"`)
+- **name**: A user-defined semantic label (e.g., "balance")
+- **pattern**: A regex that matches role URIs across filings
 
 Pattern matching ensures data extraction remains consistent across time,
-enabling reliable historical tracking without manual intervention.
-
-Role patterns are:
-
-- Shared across multiple groups (Balance, Balance.Assets, Balance.Liabilities)
-- Company-specific
+enabling reliable historical tracking.
 
 ### Concepts
 
 Define **what** to extract (which financial metrics). In XBRL, concepts are
-the fundamental data elements that represent financial line items like
-"CashAndCashEquivalentsAtCarryingValue",
-"RevenueFromContractWithCustomerExcludingAssessedTax", or
-"AccountsPayableCurrent". Each concept has a tag name from a taxonomy
-(typically US-GAAP) that identifies what the number represents.
-
-However, concept tags frequently change between companies reporting similar
-items. For example, "Cash" might appear as `CashAndCashEquivalents`,
-`CashAndCashEquivalentsAtCarryingValue`, or
-`CashCashEquivalentsAndShortTermInvestments` depending on the taxonomy version
-and company choice.
+the fundamental data elements that represent financial line items. However,
+concept tags frequently change between companies and over time as accounting
+standards evolve.
 
 A concept pattern in edgar-pipes consists of:
 
-- **name**: A user-defined semantic label (e.g., "Cash", "Revenue")
-- **pattern**: A regex matching concept tags (e.g., `"^CashAndCashEquivalents.*$"`)
+- **name**: A user-defined semantic label (e.g., "Cash")
+- **pattern**: A regex matching concept tags
 - **uid**: A user-assigned numeric ID for easy reference
 
-Pattern matching abstracts away taxonomy variations, mapping multiple similar
-tags to a single consistent label across time and companies.
-
-Concept patterns are:
-
-- Company-specific (different companies may need different patterns)
-- Linked to one or more groups
-- Tracked by uid for convenient bulk operations
+Pattern matching abstracts away taxonomy variations, mapping multiple tags to a
+single consistent label across time and companies.
 
 ### Groups
 
-Groups are an edgar-pipes concept (not part of XBRL) that organize patterns
-into cohesive analytical views for reporting.
+Groups organize patterns into cohesive datasets for extraction and reporting. A
+group brings together:
 
-A group brings together:
+- **Role patterns**: Define the data scope (which filing sections)
+- **Concept patterns**: Define what to extract (which metrics)
+- **Hierarchy**: Groups can derive from parent groups with filtered concepts
 
-- **Role patterns**: Define the data scope (which filing sections to examine)
-- **Concept patterns**: Define what to extract (which financial metrics)
-- **Hierarchy**: Groups can be derived from parent groups with filtered concepts
-
-Example hierarchy: `Balance` -> `Balance.Assets` -> `Balance.Assets.Current`
-
-Multiple groups can share the same role patterns (data scope) while maintaining
-different concept selections. Groups are the unit of extraction and
-reporting. When you run `ep update -t AAPL -g Balance`, edgar-pipes extracts
-facts matching that group's role and concept patterns for the given ticker.
+Groups are the unit of extraction. When you run `ep build`, edgar-pipes
+extracts facts matching each group's role and concept patterns.
 
 
 ## Quick Start
-
-**New to edgar-pipes?** Check out [CHEATSHEET.md](CHEATSHEET.md) for a quick
-command reference with common workflows and patterns.
-
-**Working with AI agents?** The `ep` command's composable pipeline architecture
-mechanisms make it well-suited for AI-driven financial analysis. AI agents can
-systematically discover, validate, and extract financial data using the
-progressive discovery workflow. See
-[docs/agents/AI_AGENT_GUIDE.md](docs/agents/AI_AGENT_GUIDE.md) for
-AI Agent guidance, validation strategies, and best practices for accurate
-financial data extraction.
 
 ### Installation
 
@@ -144,256 +94,188 @@ financial data extraction.
 git clone https://github.com/emifrn/edgar-pipes.git
 cd edgar-pipes
 
-# Install package
+# Install package (virtual environment recommended)
+python -m venv edgar-env
+source edgar-env/bin/activate
 pip install -e .
+
+# Verify installation
+ep --help
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+Use `-e` (editable) if you want to modify the code or pull updates.
 
-### Workspace Initialization
+**Updating:**
+```bash
+cd edgar-pipes && git pull origin main
+```
 
-Initialize a new workspace with the `ep init` command:
+### Initialize and Build
 
 ```bash
-$ mkdir aapl && cd aapl
-$ ep init
+# Create new workspace
+mkdir mycompany && cd mycompany
 
-Welcome to edgar-pipes!
+# Initialize ep.toml (prompts for user-agent, ticker, cutoff date)
+ep init
 
-This will create an ep.toml configuration file in the current directory.
-
-The SEC requires a user-agent for API requests.
-Your name and email (e.g., "John Doe john@example.com"): Your Name your.email@example.com
-Company ticker (e.g., AAPL): AAPL
-Database path (relative to ep.toml): [db/edgar.db]
-
-Initializing database: /home/user/aapl/db/edgar.db
-Fetching company information from SEC for AAPL...
-✓ Found company: Apple Inc. (CIK: 0000320193)
-✓ Created /home/user/aapl/ep.toml
-
-✓ Workspace initialized successfully!
-
-Company: Apple Inc.
-Ticker: AAPL
-CIK: 0000320193
-Database: /home/user/aapl/db/edgar.db
-
-Next steps:
-  1. Run 'ep probe filings' to fetch SEC filings
-  2. Run 'ep probe concepts' to explore XBRL concepts
-  3. Edit ep.toml to define roles and concepts for your analysis
-  4. Run 'ep build -c' to validate configuration
-  5. Run 'ep build' to extract financial data
+# Build database (fetches filings and caches role names)
+ep build
 ```
 
-The `ep init` command:
-- Prompts for user-agent (required by SEC)
-- Prompts for company ticker
-- Fetches company information from SEC automatically
-- Creates database and initializes schema
-- Creates ep.toml configuration file with example roles and concepts
-- Workspace is ready for exploration immediately
+After `ep build` completes, your database contains:
+- All filings for the ticker (from cutoff date forward)
+- All role names for each filing
+- No facts yet (no patterns defined)
 
-### Working with Workspaces
+You're now ready to explore and define patterns.
 
-edgar-pipes uses workspaces to organize your analysis. A workspace is configured via an `ep.toml` file that edgar-pipes automatically discovers by walking up the directory tree from your current location.
+### Explore and Define Patterns
 
-Typical directory structure after initialization:
+```bash
+# View available role names
+ep select filings | ep select roles -c role_name -u
+
+# Test a role pattern
+ep select filings | ep select roles -p '(?i).*balance.*' -c role_name -u
+
+# Edit ep.toml to add the role pattern
+# [roles.balance]
+# pattern = "(?i)^CONSOLIDATEDBALANCESHEETS.*$"
+
+# Probe concepts for that role
+ep select filings | ep select roles -p '(?i)^CONSOLIDATEDBALANCESHEETS' | ep probe concepts
+
+# View concept tags
+ep select filings | ep select roles -p '(?i)^CONSOLIDATEDBALANCESHEETS' | ep select concepts -c tag -u
+
+# Edit ep.toml to add concept patterns and groups
+# See docs/examples/ for complete ep.toml examples
 ```
-aapl/
-  ep.toml          # Workspace configuration (user preferences, schema, targets)
+
+### Extract Facts
+
+```bash
+# Build database with your patterns (extracts facts)
+ep build
+
+# Generate reports
+ep report -g Balance --quarterly
+```
+
+**New to edgar-pipes?** See [CHEATSHEET.md](CHEATSHEET.md) for command reference.
+
+## Working with ep.toml
+
+All patterns are defined in the `ep.toml` configuration file. After exploring
+role names and concept tags, you manually edit this file to add your patterns.
+
+Typical workflow structure:
+```
+mycompany/
+  ep.toml          # Configuration (edited manually)
   db/
     edgar.db       # SQLite database
 ```
 
-**Key features:**
-- All configuration in single `ep.toml` file (user preferences, schema, targets)
-- Paths in `ep.toml` are relative to the `ep.toml` file location
-- edgar-pipes finds `ep.toml` by walking up from current directory
-- Workspace root propagates through pipelines automatically
-- `ep.toml` can be version-controlled for reproducible workflows
-- Human-readable TOML format with comments for documentation
+Example ep.toml structure:
 
-### Workflows
+```toml
+# User preferences
+user_agent = "Your Name your@email.com"
+ticker = "AAPL"
+database = "db/edgar.db"
+cutoff = "2015-01-01"
 
-#### New company setup
+# Define role patterns
+[roles.balance]
+pattern = "(?i)^CONSOLIDATEDBALANCESHEETS.*$"
 
-When analyzing a new company for the first time without any pre-existing
-references, follow this process:
+# Define concept patterns
+[concepts.Cash]
+uid = 1
+pattern = "^CashAndCashEquivalents.*$"
+
+[concepts.Revenue]
+uid = 100
+pattern = "^RevenueFromContractWithCustomer.*$"
+
+# Define groups linking roles and concepts
+[groups.Balance]
+role = "balance"
+concepts = [1]
+
+# Derived groups (inherit role from parent)
+[groups."Balance.Assets"]
+from = "Balance"
+concepts = [1]
+```
+
+See [docs/examples/](docs/examples/) for complete ep.toml examples.
+
+## Common Workflows
+
+### Updating with New Filings
+
+Once patterns are defined, updating is straightforward:
 
 ```bash
-# 1. Discover what filings are available for a given company, identified by its ticker
-ep probe filings -t <TICKER>
-
-# 2. Explore role names included in the selected filings
-ep select filings -t <TICKER> | ep probe roles
-
-# 3. Create group (container for role and concept patterns)
-# A group typically contains one role pattern and many concept patterns
-# Groups can be created before patterns are defined
-ep new group Balance
-
-# 4. Find role pattern by filtering role names
-# The number of roles in any filing is typically in the hundreds
-# Start with a broad pattern to see what matches (use (?i) for case-insensitive matching)
-ep select filings -t <TICKER> | ep select roles -p '(?i).*balance.*' --cols role_name --uniq
-
-# 5. Once you've identified the right pattern, create a named role-pattern
-# This pattern will match role URIs across all filings and can be shared across related groups
-ep new role -t <TICKER> -n balance -p '<REFINED_REGEX>'
-
-# 6. Link the role pattern to your group
-# Role names are not unique across companies, so --ticker is needed to disambiguate
-ep add role -t <TICKER> -n balance -g Balance
-
-# 7. Import concepts from the matched roles into local database
-# All operations retrieving data via EDGAR public API use the probe command
-ep select filings -t <TICKER> | ep select roles -g Balance | ep probe concepts
-
-# 8. Inspect concept tags to identify patterns
-# View all unique concept tags across matching filing-roles
-ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -c tag -u
-
-# Check pattern coverage by identifying gaps (filing-roles missing specific
-# concepts) using option -m. Empty result means full coverage; any rows indicate
-# the pattern needs refinement or the concept doesn't appear consistently across
-# all filings.
-ep select filings -t <TICKER> | ep select roles -g Balance | ep select concepts -p '(?i)Cash' -m
-
-# 9. Create concept patterns for desired financial metrics. The option -u
-# associates a "user-id" to a concept for easier reference and bulk operations.
-ep new concept -t <TICKER> -n "Cash" -p "^CashAndCashEquivalents.*$" -u 1
-ep new concept -t <TICKER> -n "Accounts payable" -p "^AccountsPayableCurrent$" -u 2
-# ... create more concept patterns ...
-
-# 10. Link concept patterns to group
-ep add concept -t <TICKER> -g Balance -u 1 2
-
-# 11. Extract facts into database
-ep update -t <TICKER> -g Balance
-
-# 12. Generate reports
-ep report -t <TICKER> -g Balance --quarterly
+# Fetch latest filings and extract facts
+ep build
 ```
 
-#### Specialized groups
+The `build` command automatically:
+- Fetches new filings from SEC
+- Extracts facts for all groups
+- Updates existing facts if taxonomy changed
 
-Derived groups share the same role patterns (data scope) but filter to specific
-concepts. This enables:
-
-- Creating detailed reports for specific sections (just Assets, just Liabilities)
-- Maintaining consistency (all groups use the same filing data)
-- Organizing hierarchically (from comprehensive to specific)
-
-Concepts can be organized into groups mirroring financial statements as shown
-in the conceptual map below.
-
-```
-Balance
-  - Balance.Assets
-      - Balance.Assets.Current
-      - Balance.Assets.NonCurrent
-  - Balance.Liabilities
-      - Balance.Liabilities.Current
-      - Balance.Liabilities.NonCurrent
-
-Operations
-  - Operations.Revenue
-  - Operations.OpEx
-  - Operations.NonOperating
-  - Operations.PerShare
-
-CashFlow
-  - CashFlow.Operating
-  - CashFlow.Investing
-  - CashFlow.Financing
-```
-
-Some commands to illustrate the creation of specialized groups:
+### Reporting
 
 ```bash
-# Derive subgroups that share the same role patterns but have filtered concept
-# selections
+# Generate quarterly report
+ep report -g Balance --quarterly
 
-ep new group Balance.Assets --from Balance -t <TICKER> --uid 1 2 3 ... 20
-ep new group Balance.Liabilities --from Balance -t <TICKER> --uid 21 22 ... 40
+# Export to CSV
+ep report -g Balance --yearly --csv > output.csv
+
+# View specific derived group
+ep report -g Balance.Assets.Current --yearly
 ```
 
-#### Updates
+### Hierarchical Groups
 
-The initial phase of defining roles, concepts and groups for a given company is
-undoubtedly the most time consuming step. However, once it is complete, updating
-the database with new filings is a straightforward process, does not require
-user attention and can be easily automated.
+Groups can derive from parent groups to create focused reports:
 
-```bash
-ep update -t <TICKER> --force
+```toml
+[groups.Balance]
+role = "balance"
+concepts = [1, 2, 3, 4, 5, 6]  # All balance sheet items
+
+[groups."Balance.Assets"]
+from = "Balance"
+concepts = [1, 2, 3]  # Just assets
+
+[groups."Balance.Liabilities"]
+from = "Balance"
+concepts = [4, 5, 6]  # Just liabilities
 ```
 
-Other options are also available for updating only a specific group as shown
-below, although most of the time the most convenient procedure is to update
-all groups at once.
-
-```bash
-ep update -t <TICKER> -g <GROUP> --force
-```
-
-#### Reports
-
-The report command queries the existing data in the database and returns data in
-tabular form using the "rich" library when presented to the terminal. Other
-formats are also supported such as --csv and --json.
-
-```bash
-$ ep report -t BKE -g Balance.Assets.Current --yearly
-
-FY    Period  Scale  Cash     Inventory  Investments.Current  Prepaids.Current  Receivables.Current
-2021  FY      M      253.97   102.095    12.926               10.128            12.087
-2022  FY      M      252.077  125.134    20.997               12.48             12.648
-2023  FY      M      268.213  126.29     22.21                18.846            8.697
-2024  FY      M      266.929  120.789    23.801               20.932            6.758
-
-# Export multiple companies to CSV
-ep --csv report -t BKE -g Balance --yearly > bke.csv
-ep --csv report -t MSFT -g Balance --yearly > microsoft.csv
-```
-
-Additional examples:
-
-```bash
-# Track gross margins over time
-ep report -t AEO -g Operations.Revenue --yearly
-
-# Analyze operating cash flow components
-ep report -t AEO -g CashFlow.Operating --quarterly
-
-# Track earnings per share and dilution
-ep report -t AEO -g Operations.PerShare --quarterly
-
-# Find which concepts appear consistently
-ep stats concepts -t AEO -g Balance --limit 20
-```
+Derived groups share the parent's role pattern but filter concepts.
 
 ## Commands Overview
 
-More commands are available with edgar-pipes. For additional information and
-examples, refer to each command help section, e.g. "ep delete -h".
-
 | Command   | Purpose |
 |-----------|---------|
-| `init`    | Initialize workspace with ep.toml configuration |
-| `build`   | Build database from ep.toml schema (use -c to validate) |
-| `probe`   | Discover and cache filings, roles, concepts |
-| `add`     | Link role and concepts to groups |
-| `new`     | Create groups and patterns |
-| `select`  | Query entities, filings, patterns |
-| `update`  | Extract facts into database |
+| `init`    | Initialize workspace with ep.toml |
+| `build`   | Fetch filings, cache roles, extract facts |
+| `select`  | Query filings, roles, concepts, groups |
+| `probe`   | Cache concepts for specific filing-roles |
 | `report`  | Generate financial reports |
-| `calc`    | Perform calculations on data |
 | `stats`   | Analyze concept frequency |
-| `modify`  | Update patterns and manage group membership |
+| `modify`  | Update patterns in database |
 | `delete`  | Remove data from database |
+
+Run `ep <command> -h` for detailed help on each command.
 
 ## Requirements
 
@@ -447,29 +329,16 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 Created by emifrn
 
-## Developer Documentation
+## Documentation
 
-Comprehensive documentation for contributors and developers:
-
-- **[Architecture Overview](docs/developers/architecture.md)** - System design and component layers
-- **[Module Documentation](docs/developers/modules/)** - Detailed docs for each module:
-  - [Main & Pipeline](docs/developers/modules/main_and_pipeline.md) - Entry point and command composition
-  - [CLI](docs/developers/modules/cli.md) - Command modules and utilities
-  - [Cache](docs/developers/modules/cache.md) - Smart resolution layer
-  - [Config](docs/developers/modules/config.md) - Configuration management
-  - [Database](docs/developers/modules/db.md) - Storage layer and queries
-  - [XBRL](docs/developers/modules/xbrl.md) - SEC API and XBRL parsing
-- **[Design Decisions](docs/developers/decisions/)** - Rationale behind key architectural choices
-- **[Examples](docs/examples/)** - Sample workflows and ep.toml configurations
-
-See example ep.toml configurations in the docs/examples/ directory for common
-company analysis patterns.
+- **[CHEATSHEET.md](CHEATSHEET.md)** - Quick command reference
+- **[Examples](docs/examples/)** - Sample ep.toml configurations
+- **[Architecture](docs/developers/architecture.md)** - System design for contributors
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/emifrn/edgar-pipes/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/emifrn/edgar-pipes/discussions)
-- **Documentation**: [docs/](docs/)
 
 ---
 

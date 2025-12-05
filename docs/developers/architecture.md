@@ -4,10 +4,7 @@ High-level overview of the system design and architectural choices. This
 document provides the conceptual framework for understanding how edgar-pipes
 components work together.
 
-For detailed implementation information, see:
-- **[Module Documentation](modules/)** - In-depth coverage of each component
-- **[Design Decisions](decisions/)** - Rationale behind key architectural choices
-- **[Examples](../examples/)** - Sample workflows demonstrating the system in action
+See **[Examples](../examples/)** for sample workflows demonstrating the system in action.
 
 ## Component layers
 
@@ -19,14 +16,12 @@ datasets. The command includes the following components:
 1. CLI component (`edgar/cli/`) - 15 subcommands (probe, select, new, add,
    update, report, etc.). Each command follows the Cmd protocol: receives `Cmd`
    from stdin, returns `Result[Cmd, str]`. Commands compose via Linux pipes for
-   complex data manipulations. See [cli.md](modules/cli.md) for details.
+   complex data manipulations.
 
 2. Database component (`edgar/db/`) - SQLite-based storage with two modules:
 
    - `store.py`: Schema definition and CRUD operations (insert, select, delete)
    - `queries/`: Business logic modules (entities, filings, roles, concepts, facts)
-
-   See [db.md](modules/db.md) for schema and query details.
 
 3. XBRL component (`edgar/xbrl/`) - Arelle wrapper for parsing XBRL files:
 
@@ -34,26 +29,15 @@ datasets. The command includes the following components:
    - `sec_api.py`: Fetch filing metadata from SEC EDGAR API
    - `facts.py`: Fact extraction and context processing
 
-   See [xbrl.md](modules/xbrl.md) for API and parsing details.
-
 4. Cache component (`edgar/cache.py`) - Smart resolver implementing
    fetch-on-demand: checks local DB → fetches from SEC API → caches → returns.
-   Provides transparent network/database abstraction to CLI commands. See
-   [cache.md](modules/cache.md) for resolution logic.
+   Provides transparent network/database abstraction to CLI commands.
 
-5. Journal component (`edgar/cli/journal.py`) - Explicit journal recording
-   (via `-j` flag) with replay capability. System history automatically tracked
-   in tmp. Journals stored in JSONL format enable reproducible workflows,
-   templates, and shareable company libraries. See
-   [cli.md](modules/cli.md#journal-management) for journal system details.
+5. Configuration (`edgar/config.py`) - Workspace configuration via `ep.toml`.
+   Handles workspace discovery, database path resolution, and user preferences.
 
 6. Pipeline orchestration (`edgar/pipeline.py`) - Packet envelope management
-   for command composition. Tracks pipeline history for journaling and debugging.
-   See [main_and_pipeline.md](modules/main_and_pipeline.md) for protocol details.
-
-7. Configuration (`edgar/config.py`) - User agent, database paths, themes.
-   Precedence: env vars → config file → defaults. See
-   [config.md](modules/config.md) for configuration management.
+   for command composition. Tracks pipeline history for debugging.
 
 ## Command execution flow
 
