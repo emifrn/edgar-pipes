@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = [
     "arelle-release @ git+https://github.com/Arelle/Arelle.git@master",
+    "requests>=2.31.0",
+    "rich>=13.0.0",
 ]
 authors = [
     {name = "emifrn", email = "emifrn@users.noreply.github.com"}

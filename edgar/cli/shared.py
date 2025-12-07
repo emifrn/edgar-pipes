@@ -8,7 +8,6 @@ import csv
 import json
 import argparse
 import datetime
-from tabulate import tabulate
 from typing import Any, TypedDict
 
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
