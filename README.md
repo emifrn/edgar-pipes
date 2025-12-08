@@ -224,7 +224,7 @@ ep report -g Balance --quarterly
 ep report -g Operations --yearly
 ```
 
-**New to edgar-pipes?** See [CHEATSHEET.md](CHEATSHEET.md) for command reference.
+**New to edgar-pipes?** See [HOWTO.md](HOWTO.md) for practical workflow guide.
 
 ## Requirements
 
@@ -252,7 +252,7 @@ perspectives are invaluable.
 
 ## Documentation
 
-- **[CHEATSHEET.md](CHEATSHEET.md)** - Quick command reference
+- **[HOWTO.md](HOWTO.md)** - Practical workflow guide
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Coding conventions
 - **[Architecture](docs/developers/architecture.md)** - System design for contributors
 
