@@ -360,16 +360,16 @@ ep select groups -n OldGroup | ep delete -y
 ep report -g Balance --quarterly
 
 # JSON Lines
-ep report -g Balance --quarterly --json
+ep --json report -g Balance --quarterly
 
 # CSV
-ep report -g Balance --quarterly --csv > output.csv
+ep --csv report -g Balance --quarterly > output.csv
 
 # TSV (gnuplot-compatible)
-ep report -g Balance --quarterly --tsv
+ep --tsv report -g Balance --quarterly
 
 # Custom table theme
-ep report -g Balance --quarterly --theme nobox-minimal
+ep --theme nobox-minimal report -g Balance --quarterly 
 ```
 
 Available themes: `default`, `financial`, `minimal`, `grid`, `nobox`, `nobox-minimal` (with `-light`/`-dark` variants)
