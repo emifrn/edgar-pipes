@@ -22,12 +22,14 @@ requirements. This approach shifts the focus from building software for
 financial data extraction to a more interactive exploration of financial
 information directly in the Linux terminal.
 
-XBRL financial data varies in structure: role URIs and concept tags differ
-between companies and change over time as reporting practices evolve.
-edgar-pipes addresses this through progressive discovery and pattern matching -
-users explore actual role names and concept tags in their filings, then define
-regex patterns that map variations to consistent semantic labels. Patterns are
-defined in a declarative `ep.toml` configuration file.
+The ep command use regular expression matching to select XBRL roles and concept
+tags. Companies' financial filings are subject to variations as reporting
+structures evolve over time. Names of presentation roles may change between
+quarterly and yearly reports, or concept tags may be reorganized at some
+historical moment as accounting standards update. edgar-pipes solves this with
+pattern matching: users explore what's actually in their filings, then define
+patterns that capture variations under a single semantic label, ensuring
+consistent data extraction across a company's entire filing history.
 
 The workflow begins with workspace initialization, which creates `ep.toml` and
 builds a database containing filing information and role names. Users then
@@ -39,13 +41,13 @@ creating stable semantic datasets that remain consistent as XBRL taxonomies
 evolve.
 
 The `ep.toml` file serves as the foundation for reproducible financial
-analysis. It captures the pattern definitions that users develop through
-exploration, making their extraction logic explicit, shareable, and
-version-controllable. Once defined, this configuration becomes the basis for
-building databases: users can recreate their analysis environment or share it
-with others. As new filings become available, a simple update command refreshes
-the database using the established patterns, maintaining consistent semantic
-groups across growing datasets.
+analysis. After exploring and defining patterns interactively via CLI commands,
+users run `ep export` to generate `ep.toml` from their database, making
+extraction logic explicit, shareable, and version-controllable. This
+configuration becomes the basis for rebuilding databases: users can recreate
+their analysis environment or share it with others. As new filings become
+available, a simple update command refreshes the database using the established
+patterns, maintaining consistent semantic groups across growing datasets.
 
 
 ## Key Concepts
@@ -136,7 +138,7 @@ ep init
 ep build
 ```
 
-After `ep build` completes, your database contains:
+After `ep build` completes, the database contains:
 - All filings for the ticker (from cutoff date forward)
 - All role names for each filing
 - No concepts yet (discovered through exploration)
@@ -144,7 +146,7 @@ After `ep build` completes, your database contains:
 - No facts yet (extracted once patterns are defined)
 
 Users are now ready to explore roles and concepts through the progressive
-discovery workflow, mapping their findings into `ep.toml` patterns.
+discovery workflow, creating patterns via CLI and exporting to `ep.toml`.
 
 ### Explore and Define Patterns
 
@@ -155,61 +157,58 @@ ep select filings | ep select roles -c role_name -u
 # Test a role pattern
 ep select filings | ep select roles -p '(?i).*balance.*' -c role_name -u
 
-# Edit ep.toml to add the role pattern
-# [roles.balance]
-# pattern = "(?i)^CONSOLIDATEDBALANCESHEETS.*$"
+# Create the role pattern in database
+ep new role -n balance -p '(?i)^CONSOLIDATEDBALANCESHEETS.*$'
 
 # Probe concepts for that role
-ep select filings | ep select roles -p '(?i)^CONSOLIDATEDBALANCESHEETS' | ep probe concepts
+ep select filings | ep select roles -n balance | ep probe concepts
 
 # View concept tags
-ep select filings | ep select roles -p '(?i)^CONSOLIDATEDBALANCESHEETS' | ep select concepts -c tag -u
+ep select filings | ep select roles -n balance | ep select concepts -c tag -u
 
-# Edit ep.toml to add concept patterns
-# [concepts.Cash]
-# uid = 1
-# pattern = "^CashAndCashEquivalents.*$"
-#
-# [concepts."Total assets"]
-# uid = 2
-# pattern = "^Assets$"
+# Create concept patterns in database
+ep new concept -n "Cash" -p '^CashAndCashEquivalents.*$' -u 1
+ep new concept -n "Total assets" -p '^Assets$' -u 2
 ```
 
 ### Define Groups
 
-Once role and concept patterns are identified, bundle them into groups in
-`ep.toml`. Groups organize which concepts to extract from which roles:
+Once role and concept patterns are identified, bundle them into groups:
 
-```toml
-# Main group linking role and concepts
-[groups.Balance]
-role = "balance"
-concepts = [1, 2, 3, 4, 5]
+```bash
+# Create group and link patterns
+ep new group Balance
+ep add role -g Balance -n balance
+ep add concept -g Balance -u 1 2
 
-# Derived groups (inherit role from parent, filter concepts)
-[groups."Balance.Assets"]
-from = "Balance"
-concepts = [1, 2]
+# Create derived group (inherits role from parent)
+ep new group Balance.Assets --from Balance -u 1 2
 ```
 
 ### Extract Facts
 
-With groups defined in `ep.toml`, use `ep build` to sync the patterns to the
-database. Then use `ep update` to fetch facts from SEC filings. The update
-command downloads XBRL files, matches roles and concepts according to the
-patterns in each group, and imports the associated facts into the database.
-When no specific group is specified, all defined groups are processed.
+Use `ep update` to fetch facts from SEC filings. The update command downloads
+XBRL files, matches roles and concepts according to the patterns in each group,
+and imports the associated facts into the database.
 
 ```bash
-# Sync patterns from ep.toml to database
-ep build
-
 # Fetch facts from SEC for all groups
 ep update
 
 # Fetch facts for specific group
 ep update -g Balance
 ```
+
+### Export Configuration
+
+Once patterns are defined, export them to `ep.toml` for version control:
+
+```bash
+# Export patterns to ep.toml
+ep export -o ep.toml
+```
+
+The exported `ep.toml` can be used with `ep build` to recreate the database.
 
 ### Generate Reports
 

@@ -25,7 +25,7 @@ After `ep build`, the database contains all filings and role names. You won't ru
 
 ## Progressive discovery workflow
 
-The workflow is entirely CLI-based: explore → create patterns in database → extract facts. Patterns are tracked manually in `ep.toml` for reproducibility.
+The workflow is entirely CLI-based: explore → create patterns in database → extract facts. Use `ep export` to generate `ep.toml` from your database patterns for reproducibility.
 
 ### 1. Explore available roles
 
@@ -43,13 +43,6 @@ Once identified, create the role in the database:
 
 ```bash
 ep new role -n balance -p '(?i)^(CONDENSED)?CONSOLIDATEDBALANCESHEETS(Unaudited)?$'
-```
-
-**Document in ep.toml** (for reproducibility):
-```toml
-[roles.balance]
-pattern = "(?i)^(CONDENSED)?CONSOLIDATEDBALANCESHEETS(Unaudited)?$"
-note = "Balance sheet - handles quarterly variations"
 ```
 
 ### 3. Probe concepts for that role
@@ -72,22 +65,6 @@ ep new concept -n "Current assets" -p '^AssetsCurrent$' -u 8
 ep new concept -n "Total assets" -p '^Assets$' -u 14
 ```
 
-**Document in ep.toml**:
-```toml
-[concepts.Cash]
-uid = 1
-pattern = "^Cash(AndCashEquivalentsAtCarryingValue|CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents)$"
-note = "Aggregate pattern handling taxonomy transitions"
-
-[concepts."Current assets"]
-uid = 8
-pattern = "^AssetsCurrent$"
-
-[concepts."Total assets"]
-uid = 14
-pattern = "^Assets$"
-```
-
 UIDs are sequential numbers for easy reference. They're unique per company.
 
 ### 5. Create groups and link patterns
@@ -101,18 +78,6 @@ ep add role -g Balance -n balance
 
 # Link concepts to group
 ep add concept -g Balance -u 1 8 14
-```
-
-**Document in ep.toml**:
-```toml
-[groups.Balance]
-role = "balance"
-concepts = [1, 8, 14]
-
-# Derived group (inherits role from parent, filters concepts)
-[groups."Balance.Assets"]
-from = "Balance"
-concepts = [8, 14]
 ```
 
 ### 6. Extract facts
@@ -138,7 +103,24 @@ ep report -g Balance.Assets --yearly
 ep report -g Balance --quarterly --csv > balance.csv
 ```
 
-### 8. Repeat for other financial statements
+### 8. Export patterns to ep.toml
+
+Once discovery is complete, export your database patterns to `ep.toml` for
+version control and reproducibility:
+
+```bash
+# Export to stdout (review before saving)
+ep export
+
+# Export directly to ep.toml
+ep export -o ep.toml
+```
+
+The export command automatically reconstructs group hierarchies: groups that
+are strict subsets of other groups (within the same role) are marked as derived
+using the `from` attribute.
+
+### 9. Repeat for other financial statements
 
 Continue the discovery process for income statements, cash flow, etc.:
 
@@ -151,13 +133,16 @@ ep new group Operations
 ep add role -g Operations -n operations
 ep add concept -g Operations -u 100 110
 ep update -g Operations
+
+# Export updated patterns
+ep export -o ep.toml
 ```
 
 ---
 
 ## Rebuilding from ep.toml
 
-Once `ep.toml` is complete (documented during discovery), rebuild the database from scratch:
+Once `ep.toml` is complete, rebuild the database from scratch:
 
 ```bash
 # Delete database
@@ -169,7 +154,7 @@ ep build   # Reads ep.toml, creates all patterns, groups
 ep update  # Fetches facts for all groups
 ```
 
-`ep build` only reads from `ep.toml` - it's used for initial setup or clean rebuilds, not during exploration.
+`ep build` reads from `ep.toml` - it's used for initial setup or clean rebuilds, not during exploration.
 
 ---
 
@@ -320,6 +305,34 @@ ep modify group Balance --remove-role -n old_role -y
 
 ---
 
+## Exporting patterns
+
+Export database patterns to `ep.toml` format for version control and sharing:
+
+```bash
+# Export to stdout (preview)
+ep export
+
+# Export to file
+ep export -o ep.toml
+
+# Export without header comments
+ep export --no-header
+
+# Export specific ticker (if multiple in database)
+ep export -t AAPL
+```
+
+The export command:
+- Reads role patterns, concept patterns, and groups from the database
+- Reconstructs group hierarchies (derived groups marked with `from`)
+- Generates valid TOML output compatible with `ep build`
+
+**Workflow**: Explore interactively with `ep new` and `ep add`, then `ep export`
+to capture your work in `ep.toml` for reproducibility.
+
+---
+
 ## Deleting data
 
 Deletion requires explicit confirmation (`-y` flag):
@@ -416,14 +429,6 @@ ep new concept -n "Cash" \
   -u 1
 ```
 
-**Document in ep.toml**:
-```toml
-[concepts.Cash]
-uid = 1
-pattern = "^Cash(AndCashEquivalentsAtCarryingValue|CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents)$"
-note = "Handles transition from unrestricted to total cash in Q2 FY2020"
-```
-
 ### Organize UIDs
 
 Use numeric ranges by statement type:
@@ -448,12 +453,14 @@ ep select filings | ep select roles -p 'PATTERN' -m
 
 ```
 mycompany/
-  ├── ep.toml          # Configuration: patterns documented during discovery
+  ├── ep.toml          # Configuration: exported from database via `ep export`
   └── db/
       └── edgar.db     # SQLite database: patterns created via CLI
 ```
 
-**ep.toml is for reproducibility** - it documents what you created via CLI commands. When complete, use `ep build` to recreate the database from scratch.
+**ep.toml is for reproducibility** - use `ep export -o ep.toml` to capture your
+database patterns. When complete, use `ep build` to recreate the database from
+scratch on another machine or after resetting.
 
 Workspace is auto-discovered by walking up the directory tree from current location.
 
@@ -471,6 +478,7 @@ ep select -h
 ep new -h
 ep add -h
 ep update -h
+ep export -h
 
 # Subcommand help
 ep probe filings -h
@@ -522,35 +530,9 @@ ep update -g Balance
 
 # 9. Generate reports
 ep report -g Balance.Summary --quarterly
-```
 
-**Document in ep.toml** (copy patterns from commands above):
-
-```toml
-[roles.balance]
-pattern = "(?i)^CONSOLIDATEDBALANCESHEETS(Unaudited)?$"
-
-[concepts.Cash]
-uid = 1
-pattern = "^CashAndCashEquivalents.*$"
-
-[concepts.Inventory]
-uid = 7
-pattern = "^InventoryNet$"
-
-# ... (all other concepts)
-
-[groups.Balance]
-role = "balance"
-concepts = [1, 7, 8, 14, 21, 24, 28]
-
-[groups."Balance.Assets"]
-from = "Balance"
-concepts = [1, 7, 8, 14]
-
-[groups."Balance.Summary"]
-from = "Balance"
-concepts = [8, 14, 21, 24, 28]
+# 10. Export patterns to ep.toml for version control
+ep export -o ep.toml
 ```
 
 Later, rebuild from scratch:

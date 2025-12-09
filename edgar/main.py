@@ -50,6 +50,7 @@ def add_arguments(parser):
     cli.report.add_arguments(subparsers)
     cli.calc.add_arguments(subparsers)
     cli.stats.add_arguments(subparsers)
+    cli.export.add_arguments(subparsers)
 
 
 def get_output_format(args):
@@ -210,7 +211,8 @@ Use "ep COMMAND -h" for command-specific help''',  formatter_class=argparse.RawD
     # Workspace management commands bypass pipeline infrastructure
     # - init: creates ep.toml (can't require workspace to exist)
     # - build: builds database from ep.toml (requires workspace but not pipeline)
-    workspace_commands = ['edgar.cli.init', 'edgar.cli.build']
+    # - export: exports database to ep.toml format (requires workspace but not pipeline)
+    workspace_commands = ['edgar.cli.init', 'edgar.cli.build', 'edgar.cli.export']
 
     try:
         if args.func.__module__ in workspace_commands:
