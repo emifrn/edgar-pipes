@@ -267,7 +267,8 @@ def select_group(
     all_concepts = result[1]
 
     # 4. Match concepts to patterns (Application logic)
-    tag_to_pattern_name: dict[str, str] = {}
+    # A tag can match multiple patterns - all matches are kept (no "first match wins")
+    tag_to_pattern_names: dict[str, list[str]] = {}
     matched_concept_ids: set[int] = set()
 
     for concept_row in all_concepts:
@@ -281,9 +282,10 @@ def select_group(
             try:
                 regex = re.compile(pattern)
                 if regex.search(tag):
-                    tag_to_pattern_name[tag] = pattern_name
+                    if tag not in tag_to_pattern_names:
+                        tag_to_pattern_names[tag] = []
+                    tag_to_pattern_names[tag].append(pattern_name)
                     matched_concept_ids.add(cid)
-                    break 
             except re.error:
                 continue
 
@@ -330,12 +332,13 @@ def select_group(
     fact_rows = result[1]
 
     # 6. Map tags to pattern names in the output (Final application logic)
+    # Each fact can appear under multiple concept names if the tag matches multiple patterns
     facts = []
     for row in fact_rows:
         tag = row["tag"]
-        pattern_name = tag_to_pattern_name.get(tag)
-        
-        if pattern_name:
+        pattern_names = tag_to_pattern_names.get(tag, [])
+
+        for pattern_name in pattern_names:
             facts.append({
                 "concept_name": pattern_name,
                 "fiscal_year": row["fiscal_year"],

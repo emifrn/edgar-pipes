@@ -608,6 +608,7 @@ def _filter_mode(pivoted: list[dict[str, Any]], mode: str) -> list[dict[str, Any
 def _filter_columns(pivoted: list[dict[str, Any]], cols: list[str]) -> list[dict[str, Any]]:
     """
     Filter output to only include specified columns (plus fiscal_year/fiscal_period/mode).
+    Preserves metadata (_concept_decimals, etc.) filtered to selected columns.
     """
     filtered = []
     for row in pivoted:
@@ -616,6 +617,14 @@ def _filter_columns(pivoted: list[dict[str, Any]], cols: list[str]) -> list[dict
             "fiscal_period": row["fiscal_period"],
             "mode": row["mode"]
         }
+
+        # Preserve and filter metadata dicts to selected columns
+        for metadata_key in ("_concept_decimals", "_concept_balance", "_concept_tag"):
+            if metadata_key in row and isinstance(row[metadata_key], dict):
+                filtered_row[metadata_key] = {
+                    k: v for k, v in row[metadata_key].items() if k in cols
+                }
+
         for col in cols:
             if col in row:
                 filtered_row[col] = row[col]
