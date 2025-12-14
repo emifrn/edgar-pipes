@@ -208,17 +208,17 @@ def show_status(ep_toml_path: Path) -> Result[None, str]:
 
     # Try to load and show basic info
     try:
-        workspace_root, ep_config = config.load_toml()
+        workspace_root, cfg = config.load_toml()
 
         print("Configuration:")
-        print(f"  Ticker: {config.get_ticker(ep_config)}")
-        print(f"  CIK: {config.get_cik(ep_config)}")
-        print(f"  Database: {ep_config.get('database', 'not set')}")
+        print(f"  Ticker: {config.get_ticker(cfg)}")
+        print(f"  CIK: {config.get_cik(cfg)}")
+        print(f"  Database: {cfg.get('database', 'not set')}")
 
         # Count schema elements
-        num_roles = len(ep_config.get("roles", {}))
-        num_concepts = len(ep_config.get("concepts", {}))
-        num_groups = len(ep_config.get("groups", {}))
+        num_roles = len(cfg.get("roles", {}))
+        num_concepts = len(cfg.get("concepts", {}))
+        num_groups = len(cfg.get("groups", {}))
 
         print(f"\nSchema:")
         print(f"  Roles: {num_roles}")

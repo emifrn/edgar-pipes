@@ -38,9 +38,9 @@ def find_toml(start_dir: Path | None = None) -> Path | None:
 
     # Walk up directory tree
     while True:
-        ep_config = current / "ep.toml"
-        if ep_config.exists():
-            return ep_config
+        config = current / "ep.toml"
+        if config.exists():
+            return config
 
         # Check if we've reached the root
         parent = current.parent
@@ -69,9 +69,9 @@ def load_toml(workspace: str | None = None) -> tuple[Path, dict[str, Any]]:
     else:
         start_dir = Path.cwd()
 
-    ep_config_path = find_toml(start_dir)
+    config_path = find_toml(start_dir)
 
-    if ep_config_path is None:
+    if config_path is None:
         error_msg = f"""No ep.toml workspace configuration found.
 
 Searched from: {start_dir}
@@ -85,22 +85,22 @@ Or create one manually. See https://github.com/emifrn/edgar-pipes for more infor
 
     # Load the TOML file
     try:
-        with open(ep_config_path, "rb") as f:
+        with open(config_path, "rb") as f:
             cfg = tomllib.load(f)
     except Exception as e:
-        raise RuntimeError(f"Error loading {ep_config_path}: {e}")
+        raise RuntimeError(f"Error loading {config_path}: {e}")
 
     required_fields = ["database", "ticker"]
     missing_fields = [field for field in required_fields if field not in cfg]
 
     if missing_fields:
         raise RuntimeError(
-            f"{ep_config_path}: Missing required fields: {', '.join(missing_fields)}\n"
+            f"{config_path}: Missing required fields: {', '.join(missing_fields)}\n"
             f"Run 'ep init' to create a valid configuration."
         )
 
     # Workspace root is the directory containing ep.toml
-    root = ep_config_path.parent
+    root = config_path.parent
 
     return root, cfg
 

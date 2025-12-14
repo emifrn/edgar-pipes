@@ -92,16 +92,16 @@ def cli_main(args):
 
         # Load workspace configuration from ep.toml
         try:
-            workspace_root, ep_config = config.load_toml(input_context.get("workspace"))
+            workspace_root, cfg = config.load_toml(input_context.get("workspace"))
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             return
 
         # Set workspace paths in args for commands
         args.workspace_root = workspace_root
-        args.ep_config = ep_config
-        args.db_path = config.get_db_path(workspace_root, ep_config)
-        args.default_ticker = config.get_ticker(ep_config)
+        args.config = cfg
+        args.db_path = config.get_db_path(workspace_root, cfg)
+        args.default_ticker = config.get_ticker(cfg)
 
         # Build context for output (workspace root propagates through pipeline)
         context = {"workspace": str(workspace_root)}
