@@ -21,15 +21,13 @@ def add_arguments(subparsers):
     # probe filings
     parser_filings = probe_subparsers.add_parser("filings", help="find and cache SEC filings")
     parser_filings.add_argument("-t", "--ticker", metavar='X', help="ticker symbol to probe")
-    parser_filings.add_argument("-c", "--cols", metavar='X', nargs="+", help="columns to include in output")
     parser_filings.add_argument("-d", "--date", metavar='X', nargs="+", help="filter by filing date constraints ('>2024-01-01', '<=2024-12-31')")
     parser_filings.add_argument("-f", "--force", action="store_true", help="bypass cache and fetch fresh filings from SEC")
     parser_filings.set_defaults(func=run)
     
-    # probe roles  
+    # probe roles
     parser_roles = probe_subparsers.add_parser("roles", help="discover XBRL roles in filings")
     parser_roles.add_argument("-a", "--access", metavar="X", help="SEC accession number (e.g., 0000320193-24-000007)")
-    parser_roles.add_argument("-c", "--cols", metavar='X', nargs="+", help="columns to include in output")
     parser_roles.add_argument("-l", "--list", action="store_true", help="output role list instead of summary")
     parser_roles.set_defaults(func=run)
     
@@ -37,7 +35,6 @@ def add_arguments(subparsers):
     parser_concepts = probe_subparsers.add_parser("concepts", help="extract financial concepts from roles")
     parser_concepts.add_argument("-a", "--access", metavar="X", help="SEC accession number (e.g., 0000320193-24-000007)")
     parser_concepts.add_argument("-r", "--role", metavar="X", help="specific role name")
-    parser_concepts.add_argument("-c", "--cols", metavar='X', nargs="+", help="columns to include in output")
     parser_concepts.set_defaults(func=run)
 
 

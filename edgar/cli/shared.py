@@ -83,14 +83,27 @@ def parse_date_constraints(date_args: list[str] | None, field_name: str = 'filin
 
 def _cols_grep(available_cols: list[str], desired_cols: list[str]) -> Result[list[str], str]:
     """
-    Filter available columns to only those that exist in desired list.
-    Like grep - find matches between two lists.
+    Filter available columns to only those that match desired patterns.
+    Uses prefix matching: pattern must uniquely identify a single column.
+
+    Examples:
+        available: ["Revenue (K)", "Store.Total (count)"]
+        desired: ["Revenue", "Store.Tot"]
+        -> ok(["Revenue (K)", "Store.Total (count)"])
     """
-    valid_cols = [col for col in desired_cols if col in available_cols]
-    
+    result = match_columns(desired_cols, available_cols)
+    if is_not_ok(result):
+        return result
+
+    col_matches = result[1]
+
+    # Return matched columns in the order they were requested
+    # Skip requested columns that didn't match (consistent with old behavior)
+    valid_cols = [col_matches[req] for req in desired_cols if req in col_matches]
+
     if not valid_cols:
-        return err(f"cli.shared._cols_grep: none of the requested columns are available")
-    
+        return err(f"cli.shared._cols_grep: none of the requested columns matched")
+
     return ok(valid_cols)
 
 

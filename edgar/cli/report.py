@@ -608,8 +608,28 @@ def _filter_mode(pivoted: list[dict[str, Any]], mode: str) -> list[dict[str, Any
 def _filter_columns(pivoted: list[dict[str, Any]], cols: list[str]) -> list[dict[str, Any]]:
     """
     Filter output to only include specified columns (plus fiscal_year/fiscal_period/mode).
-    Preserves metadata (_concept_decimals, etc.) filtered to selected columns.
+    Uses prefix matching to identify columns even with unit suffixes.
+    Preserves metadata (_concept_decimals, etc.) filtered to matched columns.
+
+    Examples:
+        cols=["Revenue", "Store.Tot"] matches ["Revenue (K)", "Store.Total (count)"]
     """
+    if not pivoted:
+        return pivoted
+
+    # Get available concept columns (exclude metadata)
+    metadata_cols = {"fiscal_year", "fiscal_period", "mode", "_concept_decimals", "_concept_balance", "_concept_tag"}
+    available_cols = [k for k in pivoted[0].keys() if k not in metadata_cols]
+
+    # Match requested patterns to available columns
+    result = cli.shared.match_columns(cols, available_cols)
+    if is_not_ok(result):
+        # If matching fails, fall back to exact matching (shouldn't happen in practice)
+        matched_cols = [c for c in cols if c in available_cols]
+    else:
+        matched_cols = list(result[1].values())
+
+    # Filter each row
     filtered = []
     for row in pivoted:
         filtered_row = {
@@ -618,14 +638,17 @@ def _filter_columns(pivoted: list[dict[str, Any]], cols: list[str]) -> list[dict
             "mode": row["mode"]
         }
 
-        # Preserve and filter metadata dicts to selected columns
+        # Preserve and filter metadata dicts to matched columns
+        # Metadata keys use base concept names (without unit suffixes)
+        matched_base_names = [cli.shared.strip_units(col) for col in matched_cols]
         for metadata_key in ("_concept_decimals", "_concept_balance", "_concept_tag"):
             if metadata_key in row and isinstance(row[metadata_key], dict):
                 filtered_row[metadata_key] = {
-                    k: v for k, v in row[metadata_key].items() if k in cols
+                    k: v for k, v in row[metadata_key].items() if k in matched_base_names
                 }
 
-        for col in cols:
+        # Add matched columns (with unit suffixes)
+        for col in matched_cols:
             if col in row:
                 filtered_row[col] = row[col]
         filtered.append(filtered_row)
