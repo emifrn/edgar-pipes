@@ -185,13 +185,17 @@ def process_cols(data: list[dict],
         display_cols = default_cols
         sort_specs = []
 
-    # Validate columns
-    available_cols = list(data[0].keys())
-    result = _cols_grep(available_cols, display_cols)
-    if is_not_ok(result):
-        return result
-
-    valid_cols = result[1]
+    # Validate columns (only if user explicitly requested specific columns)
+    if cols_args:
+        # User requested specific columns - use smart prefix matching
+        available_cols = list(data[0].keys())
+        result = _cols_grep(available_cols, display_cols)
+        if is_not_ok(result):
+            return result
+        valid_cols = result[1]
+    else:
+        # No column filtering requested - use all default columns as-is
+        valid_cols = display_cols
 
     # Apply type-aware sorting if specified
     processed_data = data
