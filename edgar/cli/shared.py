@@ -269,24 +269,19 @@ def strip_units(col_name: str) -> str:
 
 def match_columns(requested_cols: list[str], available_cols: list[str]) -> Result[dict[str, str], str]:
     """
-    Match requested column patterns to available columns with partial matching.
+    Match requested column patterns to available columns with prefix matching.
 
-    Supports both exact matches and prefix matches. For partial matches, the
-    pattern must uniquely identify a single column.
+    Finds the first unique column that starts with the requested pattern.
+    Works with or without unit suffixes - pattern just needs to uniquely
+    identify a single column.
 
     Args:
-        requested_cols: List of column patterns to match (e.g., ["Store.Tot", "Revenue"])
-        available_cols: List of available column names (e.g., ["Store.Total (count)", "Revenue (K)"])
+        requested_cols: List of column patterns (e.g., ["Store.Tot", "Revenue"])
+        available_cols: List of available columns (e.g., ["Store.Total (count)", "Revenue (K)"])
 
     Returns:
         ok(dict) - Mapping of requested pattern to matched column name
-        err(str) - Error if ambiguous match found
-
-    Matching rules:
-    1. Strip units from both requested and available columns
-    2. Exact match (after stripping) takes priority
-    3. If no exact match, try prefix match
-    4. Prefix match must be unique (only one column starts with the pattern)
+        err(str) - Error if pattern matches multiple columns
 
     Examples:
         requested: ["Store.Tot"]
@@ -295,41 +290,24 @@ def match_columns(requested_cols: list[str], available_cols: list[str]) -> Resul
 
         requested: ["Store."]
         available: ["Store.Total (count)", "Store.States (count)"]
-        -> err("Ambiguous match: 'Store.' matches multiple columns")
+        -> err("Ambiguous: 'Store.' matches multiple columns")
     """
     matches = {}
 
     for req in requested_cols:
-        req_stripped = strip_units(req)
-
-        # Try exact match first (after stripping units)
-        exact_matches = [
-            col for col in available_cols
-            if strip_units(col) == req_stripped
-        ]
-
-        if exact_matches:
-            # Exact match found (prefer first if multiple with same stripped name)
-            matches[req] = exact_matches[0]
-            continue
-
-        # Try prefix match
-        prefix_matches = [
-            col for col in available_cols
-            if strip_units(col).startswith(req_stripped)
-        ]
+        # Find all columns that start with the requested pattern
+        prefix_matches = [col for col in available_cols if col.startswith(req)]
 
         if len(prefix_matches) == 0:
-            # No match found - skip this column (will be filtered out)
+            # No match - skip this column
             continue
         elif len(prefix_matches) == 1:
-            # Unique prefix match
+            # Unique match found
             matches[req] = prefix_matches[0]
         else:
-            # Ambiguous prefix match
-            matched_names = [strip_units(col) for col in prefix_matches]
+            # Ambiguous - multiple columns match the pattern
             return err(
-                f"Ambiguous column pattern '{req}' matches multiple columns: {', '.join(matched_names)}"
+                f"Ambiguous column pattern '{req}' matches multiple columns: {', '.join(prefix_matches)}"
             )
 
     return ok(matches)
