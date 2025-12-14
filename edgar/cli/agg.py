@@ -26,6 +26,7 @@ Aggregation functions:
     count    - Count of non-null values
 """
 
+import re
 from typing import Any
 
 # Local modules
@@ -71,6 +72,18 @@ def add_arguments(subparsers):
         help="filter output to only these columns (key columns always included)"
     )
     parser_agg.set_defaults(func=run)
+
+
+def _strip_units(col_name: str) -> str:
+    """
+    Strip unit suffix from column name.
+
+    Examples:
+        "Revenue (K)" -> "Revenue"
+        "Store.Total (count)" -> "Store.Total"
+        "Assets" -> "Assets"
+    """
+    return re.sub(r'\s*\([^)]+\)\s*$', '', col_name).strip()
 
 
 def run(cmd: Cmd, args) -> Result[Cmd, str]:
@@ -139,8 +152,20 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
 
     # Apply column filtering if requested
     if args.cols:
+        # Strip units from requested columns for matching
+        requested_stripped = {_strip_units(c) for c in args.cols}
+
         # Always include key columns
-        cols_to_keep = set(args.keys) | set(args.cols)
+        cols_to_keep = set(args.keys)
+
+        # Add columns that match (with or without units)
+        for row in aggregated:
+            for col in row.keys():
+                stripped = _strip_units(col)
+                if stripped in requested_stripped:
+                    cols_to_keep.add(col)
+
+        # Filter rows to only keep selected columns
         aggregated = [
             {k: v for k, v in row.items() if k in cols_to_keep}
             for row in aggregated

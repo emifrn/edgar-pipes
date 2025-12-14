@@ -284,9 +284,9 @@ Merge rows that share common key columns (e.g., combine instant and flow mode ro
 ep report -g Stores --yearly | \
   ep agg --drop Mode
 
-# Select specific columns after aggregation
+# Select specific columns after aggregation (without unit suffixes)
 ep report -g Stores --yearly | \
-  ep agg --drop Mode -c "Store.Total (count)" "Store.Opened (count)"
+  ep agg --drop Mode -c Store.Total Store.Opened Store.Closed
 
 # Sum values when grouping by fiscal year only
 ep report -g Revenue --quarterly | \
