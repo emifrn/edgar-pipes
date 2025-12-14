@@ -275,6 +275,38 @@ ep report -g Operations --quarterly | \
 
 Available rolling functions: `rolling_sum`, `rolling_avg`, `rolling_min`, `rolling_max`
 
+### Aggregation
+
+Merge rows that share common key columns (e.g., combine instant and flow mode rows):
+
+```bash
+# Merge instant/flow rows by FY and Period, drop Mode column
+ep report -g Stores --yearly | \
+  ep agg --drop Mode
+
+# Select specific columns after aggregation
+ep report -g Stores --yearly | \
+  ep agg --drop Mode -c "Store.Total (count)" "Store.Opened (count)"
+
+# Sum values when grouping by fiscal year only
+ep report -g Revenue --quarterly | \
+  ep agg -k FY -a sum -z
+
+# Pick first value when duplicates exist
+ep report -g Balance | \
+  ep agg -k FY Period -a first
+```
+
+Aggregation functions:
+- `non-null` (default) - Single non-null value (takes first if multiple)
+- `first` - First value in row order
+- `last` - Last value in row order
+- `sum` - Sum values (use `-z` to treat NULL as 0)
+- `avg` - Average values (use `-z` to treat NULL as 0)
+- `min` - Minimum value
+- `max` - Maximum value
+- `count` - Count of non-null values
+
 ---
 
 ## Modifying patterns

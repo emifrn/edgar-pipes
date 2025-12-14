@@ -221,6 +221,11 @@ ep report -g Balance --quarterly
 
 # Generate annual report
 ep report -g Operations --yearly
+
+# Merge instant/flow mode rows and calculate ratios
+ep report -g Balance --quarterly | \
+  ep agg --drop Mode | \
+  ep calc "Current ratio = Current assets / Current liabilities"
 ```
 
 **New to edgar-pipes?** See [HOWTO.md](HOWTO.md) for practical workflow guide.

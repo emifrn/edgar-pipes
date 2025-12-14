@@ -11,6 +11,7 @@ from . import select
 from . import update
 from . import report
 from . import calc
+from . import agg
 from . import format
 from . import modify
 from . import stats

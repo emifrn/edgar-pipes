@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+**ep agg command** - Aggregate rows by grouping keys
+- Group rows by configurable key columns (default: FY, Period)
+- Multiple aggregation functions: `first`, `last`, `non-null` (default), `sum`, `avg`, `min`, `max`, `count`
+- `--drop` flag to exclude columns from output (e.g., `--drop Mode` to remove Mode column)
+- `-c` flag for column filtering
+- `-z/--null-as-zero` flag to treat NULL values as 0 for sum/avg operations
+- Useful for merging instant and flow mode rows in financial reports
+- Example: `ep report -g Stores | ep agg --drop Mode`
+
 ## [0.4.0] - 2025-11-29
 
 ### ⚠️ Breaking Changes

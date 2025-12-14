@@ -49,6 +49,7 @@ def add_arguments(parser):
     cli.update.add_arguments(subparsers)
     cli.report.add_arguments(subparsers)
     cli.calc.add_arguments(subparsers)
+    cli.agg.add_arguments(subparsers)
     cli.stats.add_arguments(subparsers)
     cli.export.add_arguments(subparsers)
 
