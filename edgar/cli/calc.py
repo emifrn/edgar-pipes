@@ -89,7 +89,7 @@ def run(cmd: Cmd, args) -> Result[Cmd, str]:
         # Strip units from all column names
         stripped_row = {}
         for col_name, value in row.items():
-            base_name = _strip_units(col_name)
+            base_name = cli.shared.strip_units(col_name)
             stripped_row[base_name] = value
         stripped_data.append(stripped_row)
 
@@ -178,19 +178,6 @@ def _parse_expression(expr_str: str) -> Result[tuple[str, str], str]:
         # No assignment - use the expression itself as column name
         expression = expr_str.strip()
         return ok((expression, expression))
-
-
-def _strip_units(col_name: str) -> str:
-    """
-    Strip unit suffix from column name.
-
-    Examples:
-        "Revenue (K)" -> "Revenue"
-        "EPS.Basic ($)" -> "EPS.Basic"
-        "Assets" -> "Assets"
-    """
-    # Remove pattern like " (unit)" at the end
-    return re.sub(r'\s*\([^)]+\)\s*$', '', col_name).strip()
 
 
 def _evaluate_expression(expression: str, row: dict[str, Any], null_as_zero: bool = False, window_data: list[dict] | None = None) -> Result[float | int | None, str]:

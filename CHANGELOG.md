@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Group rows by configurable key columns (default: FY, Period)
 - Multiple aggregation functions: `first`, `last`, `non-null` (default), `sum`, `avg`, `min`, `max`, `count`
 - `--drop` flag to exclude columns from output (e.g., `--drop Mode` to remove Mode column)
-- `-c` flag for column filtering
+- `-c` flag for column filtering with smart partial matching (e.g., `Store.Tot` matches `Store.Total (count)`)
 - `-z/--null-as-zero` flag to treat NULL values as 0 for sum/avg operations
 - Useful for merging instant and flow mode rows in financial reports
-- Example: `ep report -g Stores | ep agg --drop Mode`
+- Example: `ep report -g Stores | ep agg --drop Mode -c Store.Tot Store.Open`
+
+**Shared column matching** - New utility in `cli.shared`
+- `strip_units()` - Remove unit suffixes like `(K)`, `(count)` from column names
+- `match_columns()` - Smart column matching with exact and prefix support
+- Prefix matches must be unique to avoid ambiguity
+- Used by `agg` command for `-c` flag, available for other pipeline commands
 
 ## [0.4.0] - 2025-11-29
 
